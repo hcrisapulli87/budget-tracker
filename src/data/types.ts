@@ -54,6 +54,16 @@ export interface Subscription {
   status: SubStatus
 }
 
+export interface Account {
+  id: string
+  name: string
+  owner_id: string | null
+  balance: number | null
+  balance_as_of: string | null
+  sort_order: number
+  is_archived: boolean
+}
+
 export type BillFrequency = 'monthly' | 'quarterly' | 'annual'
 
 export interface Bill {

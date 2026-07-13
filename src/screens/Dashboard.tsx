@@ -4,11 +4,13 @@ import { useAuth } from '../auth/AuthProvider'
 import { useData } from '../data/DataProvider'
 import { fetchTransactions } from '../data/transactions'
 import { fetchSubscriptions } from '../data/subscriptions'
+import { fetchAccounts } from '../data/accounts'
 import { useRealtime } from '../data/useRealtime'
 import { summarise } from '../domain/analytics'
 import { buildInsights } from '../domain/insights'
 import { formatAUD, isoToday, addDaysIso } from '../domain/money'
-import type { Subscription, Txn } from '../data/types'
+import { AccountSheet } from '../components/AccountSheet'
+import type { Account, Subscription, Txn } from '../data/types'
 
 function shift(iso: string, delta: number): string {
   const [y, m] = iso.split('-').map(Number)
@@ -26,6 +28,8 @@ export default function Dashboard() {
   const { categories } = useData()
   const [txns, setTxns] = useState<Txn[]>([])
   const [subs, setSubs] = useState<Subscription[]>([])
+  const [accounts, setAccounts] = useState<Account[]>([])
+  const [accountSheet, setAccountSheet] = useState<{ account: Account | null } | null>(null)
   const [who, setWho] = useState<'all' | 'mine'>('all')
   const month = isoToday().slice(0, 7)
   const prevMonth = shift(month, -1)
@@ -34,9 +38,13 @@ export default function Dashboard() {
     // 4 months back feeds the spike insight's 3-month rolling average.
     fetchTransactions(`${shift(month, -3)}-01`, monthBounds(month).to).then(setTxns).catch(() => setTxns([]))
     fetchSubscriptions().then(setSubs).catch(() => setSubs([]))
+    fetchAccounts().then(setAccounts).catch(() => setAccounts([]))
   }, [month])
   useEffect(load, [load])
-  useRealtime(['budget_transactions', 'budget_subscriptions'], load)
+  useRealtime(['budget_transactions', 'budget_subscriptions', 'budget_accounts'], load)
+
+  const activeAccounts = accounts.filter((a) => !a.is_archived)
+  const balanceTotal = activeAccounts.reduce((sum, a) => sum + (a.balance ?? 0), 0)
 
   const mine = useMemo(
     () => (who === 'all' ? txns : txns.filter((t) => t.owner_id === user?.id)),
@@ -92,6 +100,31 @@ export default function Dashboard() {
       </div>
 
       <div className="card">
+        <div className="row--between">
+          <h2>Accounts</h2>
+          <button className="btn btn--small" onClick={() => setAccountSheet({ account: null })}>+ Add</button>
+        </div>
+        {activeAccounts.map((a) => (
+          <button key={a.id} className="account-row" onClick={() => setAccountSheet({ account: a })}>
+            <div className="txn__main">
+              <div className="txn__desc">{a.name}</div>
+              <div className="txn__sub">{a.balance_as_of ? `as at ${a.balance_as_of}` : 'no balance yet — tap to set'}</div>
+            </div>
+            <span className="amount">{a.balance != null ? formatAUD(a.balance) : '—'}</span>
+          </button>
+        ))}
+        {activeAccounts.length === 0 && (
+          <p className="muted">Import a statement (or add an account) and balances show up here.</p>
+        )}
+        {activeAccounts.length > 1 && (
+          <div className="row--between total-row">
+            <strong>Total</strong>
+            <span className="amount stat--small">{formatAUD(balanceTotal)}</span>
+          </div>
+        )}
+      </div>
+
+      <div className="card">
         <h2>This month</h2>
         <div className="row--between">
           <div>
@@ -123,6 +156,15 @@ export default function Dashboard() {
         {cur.byCategory.length === 0 && <p className="muted">Nothing yet this month.</p>}
         <p className="txn__sub">Categories are best guesses until you confirm them in Activity.</p>
       </div>
+
+      {accountSheet && user && (
+        <AccountSheet
+          account={accountSheet.account}
+          userId={user.id}
+          onClose={() => setAccountSheet(null)}
+          onSaved={() => { setAccountSheet(null); load() }}
+        />
+      )}
 
       {insights.length > 0 && (
         <div className="card">

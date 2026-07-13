@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../auth/AuthProvider'
 import { useData } from '../data/DataProvider'
-import { BANK_PROFILES, applyProfile, genericProfile } from '../domain/bankProfiles'
+import { BANK_PROFILES, applyProfile, genericProfile, latestBalance } from '../domain/bankProfiles'
 import type { ColumnMapping } from '../domain/bankProfiles'
 import { parseCsv } from '../domain/csv'
 import { assignKeys } from '../domain/importKey'
@@ -12,7 +12,8 @@ import { formatAUD } from '../domain/money'
 import { createImport, fetchImports } from '../data/imports'
 import { existingKeys, insertTransactions } from '../data/transactions'
 import { syncSubscriptions } from '../data/subscriptions'
-import type { ImportRecord } from '../data/types'
+import { createAccount, fetchAccounts, recordBalance } from '../data/accounts'
+import type { Account, ImportRecord } from '../data/types'
 
 interface PreviewRow extends KeyedTxn {
   duplicate: boolean
@@ -33,10 +34,14 @@ export default function ImportScreen() {
   const [result, setResult] = useState('')
   const [error, setError] = useState('')
   const [history, setHistory] = useState<ImportRecord[]>([])
+  const [accounts, setAccounts] = useState<Account[]>([])
 
   useEffect(() => {
     fetchImports().then(setHistory).catch(() => setHistory([]))
+    fetchAccounts().then(setAccounts).catch(() => setAccounts([]))
   }, [result])
+
+  const knownAccount = accounts.some((a) => !a.is_archived && a.name === account.trim())
 
   const profile = useMemo(
     () => (profileId === 'generic' ? genericProfile(mapping) : BANK_PROFILES.find((p) => p.id === profileId) ?? BANK_PROFILES[0]),
@@ -105,9 +110,24 @@ export default function ImportScreen() {
           import_id: record.id,
         })),
       )
+      // Balance capture rides the import — the statement's running-balance column
+      // is the freshest figure we'll ever get for this account, no typing needed.
+      let balanceNote = ''
+      try {
+        const bal = latestBalance(preview.map((r) => r.txn))
+        if (bal) {
+          await recordBalance(account.trim(), user.id, bal.balance, bal.dateIso)
+          balanceNote = ` Balance: ${formatAUD(bal.balance)} as at ${bal.dateIso}.`
+        } else if (!accounts.some((a) => a.name === account.trim())) {
+          await createAccount(account.trim(), user.id) // no balance column — still list the account
+        }
+      } catch {
+        // never fail an import over balance bookkeeping
+      }
       const found = await syncSubscriptions(user.id)
       setResult(
         `${fresh.length} new, ${preview.length - fresh.length} duplicates skipped.` +
+          balanceNote +
           (found ? ` ${found} possible subscription${found > 1 ? 's' : ''} spotted — check the Subs tab.` : ''),
       )
       setPreview(null)
@@ -122,8 +142,16 @@ export default function ImportScreen() {
     <div className="screen">
       <h1 className="brand">Import</h1>
       <div className="card">
-        <label className="muted">Account name</label>
-        <input className="input" value={account} placeholder="e.g. Everyday" onChange={(e) => setAccount(e.target.value)} />
+        <label className="muted">Account</label>
+        <select className="input" value={knownAccount ? account.trim() : '__new'} onChange={(e) => setAccount(e.target.value === '__new' ? '' : e.target.value)}>
+          {accounts.filter((a) => !a.is_archived).map((a) => (
+            <option key={a.id} value={a.name}>{a.name}</option>
+          ))}
+          <option value="__new">＋ New account…</option>
+        </select>
+        {!knownAccount && (
+          <input className="input" value={account} placeholder='Account name, e.g. "NAB Savings"' onChange={(e) => setAccount(e.target.value)} />
+        )}
         <label className="muted">Bank format</label>
         <select className="input" value={profileId} onChange={(e) => setProfileId(e.target.value)}>
           {BANK_PROFILES.map((p) => (

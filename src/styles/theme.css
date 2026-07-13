@@ -62,6 +62,13 @@ body {
 .chip--confirmed { border-style: solid; }
 .bar { height: 8px; border-radius: 4px; background: var(--accent); min-width: 2px; }
 .stat { font-size: 1.5rem; font-weight: 700; }
+.stat--small { font-size: 1.1rem; font-weight: 700; }
+.account-row {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 10px 2px; border: 0; border-bottom: 1px solid var(--line);
+  background: none; text-align: left; font: inherit; color: inherit; cursor: pointer;
+}
+.total-row { padding-top: 10px; }
 .list-plain { list-style: none; margin: 0; padding: 0; }
 .sheet-backdrop {
   position: fixed; inset: 0; background: rgba(20, 35, 26, 0.45);

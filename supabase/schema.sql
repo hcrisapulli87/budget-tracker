@@ -65,6 +65,19 @@ create table if not exists public.budget_subscriptions (
   unique (owner_id, merchant_norm)
 );
 
+-- One row per real-world bank account (each person keeps several). Balances are
+-- captured automatically from CSV running-balance columns at import time, or
+-- entered by hand for accounts that never see an import.
+create table if not exists public.budget_accounts (
+  id             uuid primary key default gen_random_uuid(),
+  name           text not null unique,
+  owner_id       uuid references public.profiles (id) on delete set null,
+  balance        numeric(12,2),
+  balance_as_of  date,
+  sort_order     integer not null default 0,
+  is_archived    boolean not null default false
+);
+
 create table if not exists public.budget_bills (
   id          uuid primary key default gen_random_uuid(),
   name        text not null,
@@ -129,6 +142,7 @@ on conflict (pattern) do nothing;
 -- Tandem; jointly-owned rows (categories, rules, subscriptions, bills) are
 -- writable by any authenticated user.
 
+alter table public.budget_accounts      enable row level security;
 alter table public.budget_categories    enable row level security;
 alter table public.budget_rules         enable row level security;
 alter table public.budget_imports       enable row level security;
@@ -140,7 +154,7 @@ alter table public.budget_bills         enable row level security;
 do $$
 declare t text;
 begin
-  foreach t in array array['budget_categories', 'budget_rules', 'budget_subscriptions', 'budget_bills'] loop
+  foreach t in array array['budget_categories', 'budget_rules', 'budget_subscriptions', 'budget_bills', 'budget_accounts'] loop
     execute format('drop policy if exists "%s: read all (authenticated)" on public.%I', t, t);
     execute format('create policy "%s: read all (authenticated)" on public.%I for select to authenticated using (true)', t, t);
     execute format('drop policy if exists "%s: write all (authenticated)" on public.%I', t, t);
@@ -180,7 +194,7 @@ create policy "budget_transactions: categorise any"
 do $$
 declare t text;
 begin
-  foreach t in array array['budget_transactions', 'budget_bills', 'budget_subscriptions'] loop
+  foreach t in array array['budget_transactions', 'budget_bills', 'budget_subscriptions', 'budget_accounts'] loop
     if not exists (
       select 1 from pg_publication_tables
       where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = t
