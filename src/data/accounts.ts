@@ -16,10 +16,11 @@ export async function createAccount(
   ownerId: string,
   balance: number | null = null,
   asOfIso: string | null = null,
+  goal: number | null = null,
 ): Promise<void> {
   const { error } = await supabase
     .from('budget_accounts')
-    .insert({ name: name.trim(), owner_id: ownerId, balance, balance_as_of: balance === null ? null : asOfIso })
+    .insert({ name: name.trim(), owner_id: ownerId, balance, balance_as_of: balance === null ? null : asOfIso, goal_amount: goal })
   if (error) throw error
 }
 
