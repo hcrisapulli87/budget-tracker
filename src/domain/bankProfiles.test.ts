@@ -1,14 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import { BANK_PROFILES, applyProfile, genericProfile } from './bankProfiles'
+import { BANK_PROFILES, applyProfile, genericProfile, latestBalance } from './bankProfiles'
 
 const commbank = BANK_PROFILES.find((p) => p.id === 'commbank')!
 const westpac = BANK_PROFILES.find((p) => p.id === 'westpac')!
 const ing = BANK_PROFILES.find((p) => p.id === 'ing')!
+const nab = BANK_PROFILES.find((p) => p.id === 'nab')!
+const macquarie = BANK_PROFILES.find((p) => p.id === 'macquarie')!
 
 describe('commbank profile (Date, Amount, Description, Balance — no header)', () => {
-  it('parses a spend row', () => {
+  it('parses a spend row (with running balance)', () => {
     const out = applyProfile([['23/06/2026', '-12.50', 'WOOLWORTHS SYDNEY', '+1000.00']], commbank)
-    expect(out).toEqual([{ dateIso: '2026-06-23', amount: -12.5, description: 'WOOLWORTHS SYDNEY' }])
+    expect(out).toEqual([{ dateIso: '2026-06-23', amount: -12.5, description: 'WOOLWORTHS SYDNEY', balance: 1000 }])
   })
   it('drops malformed rows', () => {
     expect(applyProfile([['garbage', 'x']], commbank)).toEqual([])
@@ -23,8 +25,8 @@ describe('westpac profile (header; Debit/Credit columns)', () => {
       ['032000123456', '25/06/2026', 'SALARY', '', '2500.00', '3000.00', '', ''],
     ]
     expect(applyProfile(rows, westpac)).toEqual([
-      { dateIso: '2026-06-23', amount: -18.99, description: 'NETFLIX.COM' },
-      { dateIso: '2026-06-25', amount: 2500, description: 'SALARY' },
+      { dateIso: '2026-06-23', amount: -18.99, description: 'NETFLIX.COM', balance: 500 },
+      { dateIso: '2026-06-25', amount: 2500, description: 'SALARY', balance: 3000 },
     ])
   })
 })
@@ -36,8 +38,66 @@ describe('ing profile (header; Date, Description, Credit, Debit, Balance)', () =
       ['23/06/2026', 'COLES 0412', '', '-54.20', '945.80'],
     ]
     expect(applyProfile(rows, ing)).toEqual([
-      { dateIso: '2026-06-23', amount: -54.2, description: 'COLES 0412' },
+      { dateIso: '2026-06-23', amount: -54.2, description: 'COLES 0412', balance: 945.8 },
     ])
+  })
+})
+
+describe('nab profile (Date, Amount, Account, blank, Type, Details, Balance — no header)', () => {
+  it('parses signed-amount rows with "15 Jul 25" dates', () => {
+    const rows = [
+      ['15 Jul 25', '-32.80', '083004123456789', '', 'EFTPOS PURCHASE', 'WOOLWORTHS 1234 MELBOURNE', '+1467.20'],
+      ['16 Jul 25', '2500.00', '083004123456789', '', 'TRANSFER CREDIT', 'SALARY ACME PTY LTD', '+3967.20'],
+    ]
+    expect(applyProfile(rows, nab)).toEqual([
+      { dateIso: '2025-07-15', amount: -32.8, description: 'WOOLWORTHS 1234 MELBOURNE', balance: 1467.2 },
+      { dateIso: '2025-07-16', amount: 2500, description: 'SALARY ACME PTY LTD', balance: 3967.2 },
+    ])
+  })
+  it('tolerates an accidental header row', () => {
+    const rows = [
+      ['Date', 'Amount', 'Account Number', '', 'Transaction Type', 'Transaction Details', 'Balance'],
+      ['15 Jul 25', '-10.00', '083004123456789', '', 'EFTPOS PURCHASE', 'COLES', '+90.00'],
+    ]
+    expect(applyProfile(rows, nab)).toHaveLength(1)
+  })
+})
+
+describe('macquarie profile (header; Date, Details, Account, Category, ..., Debit, Credit, Balance)', () => {
+  it('skips header, maps debit/credit with "05 Mar 2023" dates', () => {
+    const rows = [
+      ['Transaction Date', 'Details', 'Account', 'Category', 'Sub Category', 'Notes', 'Debit', 'Credit', 'Balance', ''],
+      ['05 Mar 2023', 'UBER *EATS', 'Transaction', 'Eating out', '', '', '24.90', '', '812.10', ''],
+      ['07 Mar 2023', 'SALARY ACME', 'Transaction', 'Income', '', '', '', '2500.00', '3312.10', ''],
+    ]
+    expect(applyProfile(rows, macquarie)).toEqual([
+      { dateIso: '2023-03-05', amount: -24.9, description: 'UBER *EATS', balance: 812.1 },
+      { dateIso: '2023-03-07', amount: 2500, description: 'SALARY ACME', balance: 3312.1 },
+    ])
+  })
+})
+
+describe('latestBalance', () => {
+  it('returns the balance of the most recent transaction (oldest-first file)', () => {
+    const parsed = [
+      { dateIso: '2026-07-01', amount: -10, description: 'A', balance: 90 },
+      { dateIso: '2026-07-02', amount: -10, description: 'B', balance: 80 },
+    ]
+    expect(latestBalance(parsed)).toEqual({ balance: 80, dateIso: '2026-07-02' })
+  })
+  it('handles newest-first files (same-date ties resolved by file order)', () => {
+    const parsed = [
+      { dateIso: '2026-07-02', amount: -10, description: 'B', balance: 80 },
+      { dateIso: '2026-07-02', amount: -5, description: 'C', balance: 85 },
+      { dateIso: '2026-07-01', amount: -10, description: 'A', balance: 90 },
+    ]
+    expect(latestBalance(parsed)).toEqual({ balance: 80, dateIso: '2026-07-02' })
+  })
+  it('returns null when no rows carry a balance', () => {
+    expect(latestBalance([{ dateIso: '2026-07-01', amount: -10, description: 'A' }])).toBeNull()
+  })
+  it('returns null for empty input', () => {
+    expect(latestBalance([])).toBeNull()
   })
 })
 

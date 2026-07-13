@@ -24,6 +24,22 @@ export function parseAuDate(raw: string): string | null {
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
 }
 
+const MONTHS: Record<string, number> = {
+  jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
+  jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
+}
+
+/** "15 Jul 25" (NAB) / "05 Mar 2023" (Macquarie) → ISO yyyy-mm-dd. */
+export function parseDayMonDate(raw: string): string | null {
+  const m = raw.trim().match(/^(\d{1,2}) ([A-Za-z]{3,}) (\d{2,4})$/)
+  if (!m) return null
+  const day = Number(m[1])
+  const month = MONTHS[m[2].slice(0, 3).toLowerCase()]
+  const year = m[3].length === 2 ? 2000 + Number(m[3]) : Number(m[3])
+  if (!month || day < 1 || day > 31) return null
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+}
+
 export function isoToday(): string {
   return new Date().toISOString().slice(0, 10)
 }

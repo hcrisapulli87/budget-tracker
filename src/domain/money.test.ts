@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatAUD, parseAmount, parseAuDate, isoToday, addDaysIso } from './money'
+import { formatAUD, parseAmount, parseAuDate, parseDayMonDate, isoToday, addDaysIso } from './money'
 
 describe('formatAUD', () => {
   it('formats dollars', () => expect(formatAUD(1234.5)).toBe('$1,234.50'))
@@ -21,6 +21,16 @@ describe('parseAuDate', () => {
   it('expands 2-digit years', () => expect(parseAuDate('23/06/26')).toBe('2026-06-23'))
   it('rejects month > 12', () => expect(parseAuDate('23/13/2026')).toBeNull())
   it('rejects non-dates', () => expect(parseAuDate('Description')).toBeNull())
+})
+
+describe('parseDayMonDate (NAB "15 Jul 25", Macquarie "05 Mar 2023")', () => {
+  it('parses d MMM yy', () => expect(parseDayMonDate('15 Jul 25')).toBe('2025-07-15'))
+  it('parses dd MMM yyyy', () => expect(parseDayMonDate('05 Mar 2023')).toBe('2023-03-05'))
+  it('parses single-digit day', () => expect(parseDayMonDate('5 Mar 2023')).toBe('2023-03-05'))
+  it('accepts full month names', () => expect(parseDayMonDate('5 March 2023')).toBe('2023-03-05'))
+  it('is case-insensitive', () => expect(parseDayMonDate('5 MAR 2023')).toBe('2023-03-05'))
+  it('rejects unknown months', () => expect(parseDayMonDate('5 Foo 2023')).toBeNull())
+  it('rejects headers', () => expect(parseDayMonDate('Transaction Date')).toBeNull())
 })
 
 describe('date helpers', () => {

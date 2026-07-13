@@ -1,9 +1,11 @@
-import { parseAmount, parseAuDate } from './money'
+import { parseAmount, parseAuDate, parseDayMonDate } from './money'
 
 export interface ParsedTxn {
   dateIso: string
   amount: number
   description: string
+  /** Running account balance after this transaction, when the export includes one. */
+  balance?: number
 }
 
 export interface BankProfile {
@@ -27,6 +29,12 @@ function signedFrom(debitRaw: string | undefined, creditRaw: string | undefined)
   return null
 }
 
+/** Optional running-balance column — undefined (not null) when absent/unparseable. */
+function balanceFrom(raw: string | undefined): number | undefined {
+  const b = raw === undefined ? null : parseAmount(raw)
+  return b === null ? undefined : b
+}
+
 export const BANK_PROFILES: BankProfile[] = [
   {
     id: 'commbank',
@@ -37,7 +45,7 @@ export const BANK_PROFILES: BankProfile[] = [
       const dateIso = parseAuDate(cols[0])
       const amount = parseAmount(cols[1])
       if (!dateIso || amount === null) return null
-      return { dateIso, amount, description: cols[2].trim() }
+      return { dateIso, amount, description: cols[2].trim(), balance: balanceFrom(cols[3]) }
     },
   },
   {
@@ -49,7 +57,32 @@ export const BANK_PROFILES: BankProfile[] = [
       const dateIso = parseAuDate(cols[1])
       const amount = signedFrom(cols[3], cols[4])
       if (!dateIso || amount === null) return null
-      return { dateIso, amount, description: cols[2].trim() }
+      return { dateIso, amount, description: cols[2].trim(), balance: balanceFrom(cols[5]) }
+    },
+  },
+  {
+    id: 'nab',
+    // NAB's TransactionHistory.csv has no header; dates look like "15 Jul 25".
+    label: 'NAB (Date, Amount, Account, Type, Details, Balance)',
+    hasHeader: false,
+    parse(cols) {
+      if (cols.length < 6) return null
+      const dateIso = parseDayMonDate(cols[0]) ?? parseAuDate(cols[0])
+      const amount = parseAmount(cols[1])
+      if (!dateIso || amount === null) return null
+      return { dateIso, amount, description: cols[5].trim(), balance: balanceFrom(cols[6]) }
+    },
+  },
+  {
+    id: 'macquarie',
+    label: 'Macquarie (Date, Details, …, Debit, Credit, Balance)',
+    hasHeader: true,
+    parse(cols) {
+      if (cols.length < 8) return null
+      const dateIso = parseDayMonDate(cols[0]) ?? parseAuDate(cols[0])
+      const amount = signedFrom(cols[6], cols[7])
+      if (!dateIso || amount === null) return null
+      return { dateIso, amount, description: cols[1].trim(), balance: balanceFrom(cols[8]) }
     },
   },
   {
@@ -61,7 +94,7 @@ export const BANK_PROFILES: BankProfile[] = [
       const dateIso = parseAuDate(cols[0])
       const amount = signedFrom(cols[3], cols[2])
       if (!dateIso || amount === null) return null
-      return { dateIso, amount, description: cols[1].trim() }
+      return { dateIso, amount, description: cols[1].trim(), balance: balanceFrom(cols[4]) }
     },
   },
 ]
@@ -101,4 +134,20 @@ export function genericProfile(m: ColumnMapping): BankProfile {
 export function applyProfile(rows: string[][], profile: BankProfile): ParsedTxn[] {
   const body = profile.hasHeader ? rows.slice(1) : rows
   return body.map((r) => profile.parse(r)).filter((t): t is ParsedTxn => t !== null)
+}
+
+/**
+ * Balance of the most recent transaction in an export — used to auto-update the
+ * account's balance on import. Banks disagree on row order (CommBank/NAB export
+ * newest-first, others oldest-first), so among rows sharing the latest date we
+ * trust file order: in a newest-first file the first row wins, otherwise the last.
+ */
+export function latestBalance(parsed: ParsedTxn[]): { balance: number; dateIso: string } | null {
+  const withBalance = parsed.filter((t) => t.balance !== undefined)
+  if (withBalance.length === 0) return null
+  const latest = withBalance.reduce((max, t) => (t.dateIso > max ? t.dateIso : max), withBalance[0].dateIso)
+  const ties = withBalance.filter((t) => t.dateIso === latest)
+  const newestFirst = parsed[0].dateIso >= parsed[parsed.length - 1].dateIso
+  const row = newestFirst ? ties[0] : ties[ties.length - 1]
+  return { balance: row.balance!, dateIso: row.dateIso }
 }
