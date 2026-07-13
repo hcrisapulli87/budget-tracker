@@ -91,6 +91,18 @@ create table if not exists public.budget_bills (
   last_paid   date
 );
 
+-- ── v3 additive changes ───────────────────────────────────────────────────────
+alter table public.budget_transactions add column if not exists note text not null default '';
+alter table public.budget_accounts     add column if not exists goal_amount numeric(12,2);
+alter table public.budget_categories   add column if not exists exclude_from_analytics boolean not null default false;
+
+-- Per-category monthly budgets (household-wide; set once, tracked automatically).
+create table if not exists public.budget_budgets (
+  id            uuid primary key default gen_random_uuid(),
+  category_id   uuid not null unique references public.budget_categories (id) on delete cascade,
+  monthly_limit numeric(12,2) not null
+);
+
 -- ── Seeds (idempotent via unique names/patterns) ─────────────────────────────
 
 insert into public.budget_categories (name, colour, icon, sort_order) values
@@ -111,6 +123,12 @@ insert into public.budget_categories (name, colour, icon, sort_order) values
   ('Income',        '#1e9a58', '💰', 15),
   ('Other',         '#9aa5b1', '📦', 16)
 on conflict (name) do nothing;
+
+-- Transfers between our own accounts must not count as spend/income.
+insert into public.budget_categories (name, colour, icon, sort_order, exclude_from_analytics)
+values ('Transfers', '#7f96ab', '↔️', 17, true)
+on conflict (name) do nothing;
+update public.budget_categories set exclude_from_analytics = true where name = 'Transfers';
 
 insert into public.budget_rules (pattern, category_id, created_from)
 select v.pattern, c.id, 'seed'
@@ -149,12 +167,13 @@ alter table public.budget_imports       enable row level security;
 alter table public.budget_transactions  enable row level security;
 alter table public.budget_subscriptions enable row level security;
 alter table public.budget_bills         enable row level security;
+alter table public.budget_budgets       enable row level security;
 
 -- shared-write tables ---------------------------------------------------------
 do $$
 declare t text;
 begin
-  foreach t in array array['budget_categories', 'budget_rules', 'budget_subscriptions', 'budget_bills', 'budget_accounts'] loop
+  foreach t in array array['budget_categories', 'budget_rules', 'budget_subscriptions', 'budget_bills', 'budget_accounts', 'budget_budgets'] loop
     execute format('drop policy if exists "%s: read all (authenticated)" on public.%I', t, t);
     execute format('create policy "%s: read all (authenticated)" on public.%I for select to authenticated using (true)', t, t);
     execute format('drop policy if exists "%s: write all (authenticated)" on public.%I', t, t);
@@ -194,7 +213,7 @@ create policy "budget_transactions: categorise any"
 do $$
 declare t text;
 begin
-  foreach t in array array['budget_transactions', 'budget_bills', 'budget_subscriptions', 'budget_accounts'] loop
+  foreach t in array array['budget_transactions', 'budget_bills', 'budget_subscriptions', 'budget_accounts', 'budget_budgets'] loop
     if not exists (
       select 1 from pg_publication_tables
       where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = t
