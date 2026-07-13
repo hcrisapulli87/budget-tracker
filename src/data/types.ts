@@ -10,6 +10,7 @@ export interface Category {
   icon: string
   sort_order: number
   is_archived: boolean
+  exclude_from_analytics: boolean
 }
 
 export type RuleOrigin = 'seed' | 'correction'
@@ -37,6 +38,7 @@ export interface Txn {
   import_hash: string
   source: TxnSource
   import_id: string | null
+  note: string
 }
 
 export type Cadence = 'weekly' | 'fortnightly' | 'monthly' | 'quarterly' | 'annual'
@@ -62,6 +64,7 @@ export interface Account {
   balance_as_of: string | null
   sort_order: number
   is_archived: boolean
+  goal_amount: number | null
 }
 
 export type BillFrequency = 'monthly' | 'quarterly' | 'annual'
@@ -77,6 +80,12 @@ export interface Bill {
   autopay: boolean
   category_id: string | null
   last_paid: string | null
+}
+
+export interface Budget {
+  id: string
+  category_id: string
+  monthly_limit: number
 }
 
 export interface ImportRecord {

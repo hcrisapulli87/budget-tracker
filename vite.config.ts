@@ -13,8 +13,8 @@ export default defineConfig({
         name: 'Tally',
         short_name: 'Tally',
         description: 'Two-person budget tracker.',
-        theme_color: '#2fbf71',
-        background_color: '#f4faf6',
+        theme_color: '#0e1411',
+        background_color: '#0e1411',
         display: 'standalone',
         start_url: '/',
         icons: [
