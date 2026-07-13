@@ -28,6 +28,7 @@ export interface AccountPatch {
   balance?: number | null
   balance_as_of?: string | null
   is_archived?: boolean
+  goal_amount?: number | null
 }
 
 export async function updateAccount(id: string, patch: AccountPatch): Promise<void> {

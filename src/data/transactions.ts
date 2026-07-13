@@ -13,6 +13,7 @@ export interface TxnInsert {
   import_hash: string
   source: TxnSource
   import_id: string | null
+  note?: string
 }
 
 export async function fetchTransactions(fromIso: string, toIso: string): Promise<Txn[]> {
@@ -51,4 +52,43 @@ export async function insertTransactions(rows: TxnInsert[]): Promise<void> {
 export async function deleteTransaction(id: string): Promise<void> {
   const { error } = await supabase.from('budget_transactions').delete().eq('id', id)
   if (error) throw error
+}
+
+export interface TxnPatch {
+  txn_date?: string
+  amount?: number
+  description?: string
+  merchant_norm?: string
+  category_id?: string | null
+  category_confirmed?: boolean
+  account?: string
+  note?: string
+}
+
+export async function updateTransaction(id: string, patch: TxnPatch): Promise<void> {
+  const { error } = await supabase.from('budget_transactions').update(patch).eq('id', id)
+  if (error) throw error
+}
+
+/** All-time description search (case-insensitive), newest first, capped. */
+export async function searchTransactions(term: string): Promise<Txn[]> {
+  const { data, error } = await supabase
+    .from('budget_transactions')
+    .select('*')
+    .ilike('description', `%${term}%`)
+    .order('txn_date', { ascending: false })
+    .limit(200)
+  if (error) throw error
+  return (data ?? []) as Txn[]
+}
+
+export async function fetchByMerchant(merchantNorm: string): Promise<Txn[]> {
+  const { data, error } = await supabase
+    .from('budget_transactions')
+    .select('*')
+    .eq('merchant_norm', merchantNorm)
+    .order('txn_date', { ascending: false })
+    .limit(200)
+  if (error) throw error
+  return (data ?? []) as Txn[]
 }
