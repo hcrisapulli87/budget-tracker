@@ -16,8 +16,13 @@ export interface Summary {
 
 const round2 = (n: number) => Math.round(n * 100) / 100
 
-export function summarise(txns: TxnLite[], fromIso: string, toIso: string): Summary {
-  const inRange = txns.filter((t) => t.txn_date >= fromIso && t.txn_date <= toIso)
+export function summarise(txns: TxnLite[], fromIso: string, toIso: string, excludedCategoryIds: Set<string> = new Set()): Summary {
+  const inRange = txns.filter(
+    (t) =>
+      t.txn_date >= fromIso &&
+      t.txn_date <= toIso &&
+      !(t.category_id !== null && excludedCategoryIds.has(t.category_id)),
+  )
   let spend = 0
   let income = 0
   const catTotals = new Map<string | null, number>()

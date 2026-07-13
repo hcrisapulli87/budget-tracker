@@ -35,4 +35,14 @@ describe('summarise', () => {
       { date: '2026-07-03', spend: 25 },
     ])
   })
+
+  it('excludes excluded categories from spend, income, and buckets', () => {
+    const rows = [
+      t('2026-07-05', -50, 'transfers'),
+      t('2026-07-05', -20, 'c1'),
+    ]
+    const sx = summarise(rows, '2026-07-01', '2026-07-31', new Set(['transfers']))
+    expect(sx.spend).toBe(20)
+    expect(sx.byCategory.find((c) => c.categoryId === 'transfers')).toBeUndefined()
+  })
 })
