@@ -1,12 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthProvider'
 import { useData } from '../data/DataProvider'
-import { fetchTransactions, insertTransactions } from '../data/transactions'
+import { deleteTransaction, fetchByMerchant, fetchTransactions, searchTransactions, updateTransaction } from '../data/transactions'
 import { applyCorrection } from '../data/rules'
 import { useRealtime } from '../data/useRealtime'
 import { formatAUD, formatDayMonth, isoToday } from '../domain/money'
 import { normaliseMerchant } from '../domain/merchant'
+import { groupByDay } from '../domain/grouping'
+import { useWho } from '../lib/useWho'
 import { CategoryPicker } from '../components/CategoryPicker'
+import { IconCircle } from '../components/ui/IconCircle'
+import { SegmentedControl } from '../components/ui/SegmentedControl'
+import { EmptyState } from '../components/ui/EmptyState'
+import type { AddPrefill } from './AddScreen'
 import type { Txn } from '../data/types'
 
 function monthLabel(iso: string): string {
@@ -25,61 +32,54 @@ function monthBounds(iso: string): { from: string; to: string } {
 
 export default function Transactions() {
   const { user } = useAuth()
-  const { categories, profiles, reload } = useData()
+  const { categories, profiles } = useData()
   const [month, setMonth] = useState(() => isoToday().slice(0, 7))
   const [txns, setTxns] = useState<Txn[]>([])
-  const [who, setWho] = useState<'all' | 'mine'>('all')
+  const [who, setWho] = useWho()
   const [catFilter, setCatFilter] = useState('')
   const [search, setSearch] = useState('')
-  const [picking, setPicking] = useState<Txn | null>(null)
-  const [adding, setAdding] = useState(false)
+  const [results, setResults] = useState<Txn[] | null>(null)
+  const [detail, setDetail] = useState<Txn | null>(null)
+
+  const searching = search.trim().length >= 2
 
   const load = useCallback(() => {
     const { from, to } = monthBounds(month)
     fetchTransactions(from, to).then(setTxns).catch(() => setTxns([]))
   }, [month])
-
   useEffect(load, [load])
   useRealtime(['budget_transactions'], load)
 
+  useEffect(() => {
+    if (!searching) return setResults(null)
+    const t = setTimeout(() => {
+      searchTransactions(search.trim()).then(setResults).catch(() => setResults([]))
+    }, 250)
+    return () => clearTimeout(t)
+  }, [search, searching])
+
+  const source = searching ? (results ?? []) : txns
   const visible = useMemo(
     () =>
-      txns.filter(
-        (t) =>
-          (who === 'all' || t.owner_id === user?.id) &&
-          (!catFilter || t.category_id === catFilter) &&
-          (!search || t.description.toLowerCase().includes(search.toLowerCase())),
+      source.filter(
+        (t) => (who === 'all' || t.owner_id === user?.id) && (!catFilter || t.category_id === catFilter),
       ),
-    [txns, who, catFilter, search, user],
+    [source, who, catFilter, user],
   )
+  const groups = useMemo(() => groupByDay(visible), [visible])
 
   const cat = (id: string | null) => categories.find((c) => c.id === id)
   const owner = (id: string) => profiles.find((p) => p.id === id)?.display_name ?? '?'
-
-  const pick = async (categoryId: string) => {
-    if (!picking) return
-    await applyCorrection(picking, categoryId)
-    setPicking(null)
-    await reload() // rules changed
-    load()
-  }
 
   return (
     <div className="screen">
       <div className="row--between">
         <h1 className="brand">Activity</h1>
-        <button className="btn btn--small" onClick={() => setAdding(true)}>+ Add</button>
+        <Link to="/import" className="gear" aria-label="Import CSV">⤓</Link>
       </div>
-      <div className="row--between card">
-        <button className="btn btn--small btn--pager" onClick={() => setMonth(shiftMonth(month, -1))}>‹</button>
-        <strong>{monthLabel(month)}</strong>
-        <button className="btn btn--small btn--pager" onClick={() => setMonth(shiftMonth(month, 1))}>›</button>
-      </div>
-      <div className="row">
-        <select className="input" value={who} onChange={(e) => setWho(e.target.value as 'all' | 'mine')}>
-          <option value="all">Both of us</option>
-          <option value="mine">Just me</option>
-        </select>
+      <input className="input" placeholder="Search everything…" value={search} onChange={(e) => setSearch(e.target.value)} />
+      <div className="row" style={{ margin: '10px 0' }}>
+        <SegmentedControl options={[{ value: 'mine', label: 'Me' }, { value: 'all', label: 'Both' }]} value={who} onChange={setWho} />
         <select className="input" value={catFilter} onChange={(e) => setCatFilter(e.target.value)}>
           <option value="">All categories</option>
           {categories.map((c) => (
@@ -87,85 +87,171 @@ export default function Transactions() {
           ))}
         </select>
       </div>
-      <input className="input" placeholder="Search descriptions…" value={search} onChange={(e) => setSearch(e.target.value)} />
+      {!searching && (
+        <div className="row--between card">
+          <button className="btn btn--small btn--pager" onClick={() => setMonth(shiftMonth(month, -1))}>‹</button>
+          <strong>{monthLabel(month)}</strong>
+          <button className="btn btn--small btn--pager" onClick={() => setMonth(shiftMonth(month, 1))}>›</button>
+        </div>
+      )}
+      {searching && <p className="txn__sub">All-time results for “{search.trim()}” — {visible.length} found</p>}
 
-      <ul className="list-plain">
-        {visible.map((t) => (
-          <li key={t.id} className="txn">
-            <div className="txn__main">
-              <div className="txn__desc">{t.description}</div>
-              <div className="txn__sub">{formatDayMonth(t.txn_date)} · {owner(t.owner_id)} · {t.account}</div>
-            </div>
-            <div className="txn__side">
-              <span className={`amount ${t.amount < 0 ? 'amount--neg' : 'amount--pos'}`}>{formatAUD(t.amount)}</span>
-              <button
-                className={`chip${t.category_confirmed ? ' chip--confirmed' : ''}`}
-                title={t.category_confirmed ? 'Confirmed' : 'Best guess — tap to correct'}
-                onClick={() => setPicking(t)}
-              >
-                {cat(t.category_id) ? `${cat(t.category_id)!.icon} ${cat(t.category_id)!.name}` : '＋ categorise'}
-              </button>
-            </div>
-          </li>
-        ))}
-        {visible.length === 0 && <p className="muted">No transactions for this view — import a CSV to get started.</p>}
-      </ul>
+      {groups.map((g) => (
+        <div key={g.dateIso}>
+          <div className="day-head">
+            <span>{formatDayMonth(g.dateIso)}</span>
+            <span>{g.spend > 0 ? `-${formatAUD(g.spend).replace('-', '')}` : ''}</span>
+          </div>
+          <ul className="list-plain card" style={{ padding: '0 10px' }}>
+            {g.txns.map((t) => (
+              <li key={t.id}>
+                <button className="txn txn--tap" onClick={() => setDetail(t)}>
+                  <IconCircle icon={cat(t.category_id)?.icon ?? '❓'} colour={cat(t.category_id)?.colour ?? '#8ba59a'} />
+                  <div className="txn__main">
+                    <div className="txn__desc">{t.description}</div>
+                    <div className="txn__sub">
+                      {searching ? `${formatDayMonth(t.txn_date)} · ` : ''}{owner(t.owner_id)} · {t.account}
+                      {!t.category_confirmed && t.category_id && ' · guess'}
+                    </div>
+                  </div>
+                  <span className={`amount ${t.amount < 0 ? 'amount--neg' : 'amount--pos'}`}>{formatAUD(t.amount)}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+      {groups.length === 0 && (
+        <EmptyState icon="🧾" title={searching ? 'Nothing found' : 'No transactions yet'} hint={searching ? 'Try a different search.' : 'Tap ＋ to add a spend, or import a CSV.'} />
+      )}
 
-      {picking && <CategoryPicker categories={categories} onPick={(id) => void pick(id)} onClose={() => setPicking(null)} />}
-      {adding && user && (
-        <ManualAdd
-          onClose={() => setAdding(false)}
-          onSaved={() => { setAdding(false); load() }}
-          userId={user.id}
+      {detail && user && (
+        <TxnSheet
+          txn={detail}
+          mine={detail.owner_id === user.id}
+          onClose={() => setDetail(null)}
+          onChanged={() => { setDetail(null); load(); if (searching) setSearch('') }}
         />
       )}
     </div>
   )
 }
 
-function ManualAdd({ userId, onClose, onSaved }: { userId: string; onClose: () => void; onSaved: () => void }) {
-  const { categories } = useData()
-  const [date, setDate] = useState(isoToday())
-  const [amount, setAmount] = useState('')
-  const [description, setDescription] = useState('')
-  const [categoryId, setCategoryId] = useState('')
+function TxnSheet({ txn, mine, onClose, onChanged }: { txn: Txn; mine: boolean; onClose: () => void; onChanged: () => void }) {
+  const { categories, reload } = useData()
+  const navigate = useNavigate()
+  const [editing, setEditing] = useState(false)
+  const [picking, setPicking] = useState(false)
+  const [merchant, setMerchant] = useState<Txn[] | null>(null)
+  const [date, setDate] = useState(txn.txn_date)
+  const [amount, setAmount] = useState(String(Math.abs(txn.amount)))
+  const [kind, setKind] = useState<'spend' | 'income'>(txn.amount < 0 ? 'spend' : 'income')
+  const [description, setDescription] = useState(txn.description)
+  const [account, setAccount] = useState(txn.account)
+  const [note, setNote] = useState(txn.note)
   const [busy, setBusy] = useState(false)
 
-  const save = async () => {
+  const cat = categories.find((c) => c.id === txn.category_id)
+
+  const saveEdit = async () => {
     const value = Number(amount)
-    if (!description.trim() || !Number.isFinite(value) || value === 0) return
+    if (!description.trim() || !Number.isFinite(value) || value <= 0) return
     setBusy(true)
-    await insertTransactions([{
-      owner_id: userId,
-      account: 'cash',
-      txn_date: date,
-      amount: -Math.abs(value),
-      description: description.trim(),
-      merchant_norm: normaliseMerchant(description),
-      category_id: categoryId || null,
-      category_confirmed: Boolean(categoryId),
-      import_hash: `manual-${crypto.randomUUID()}`,
-      source: 'manual' as const,
-      import_id: null,
-    }])
-    onSaved()
+    try {
+      await updateTransaction(txn.id, {
+        txn_date: date,
+        amount: kind === 'spend' ? -Math.abs(value) : Math.abs(value),
+        description: description.trim(),
+        merchant_norm: normaliseMerchant(description),
+        account: account.trim(),
+        note: note.trim(),
+      })
+      onChanged()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const pickCategory = async (categoryId: string) => {
+    await applyCorrection(txn, categoryId)
+    await reload()
+    setPicking(false)
+    onChanged()
+  }
+
+  const remove = async () => {
+    setBusy(true)
+    try {
+      await deleteTransaction(txn.id)
+      onChanged()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const addAgain = () => {
+    const prefill: AddPrefill = {
+      description: txn.description,
+      amount: Math.abs(txn.amount),
+      category_id: txn.category_id,
+      account: txn.account,
+      kind: txn.amount < 0 ? 'spend' : 'income',
+    }
+    navigate('/add', { state: prefill })
+  }
+
+  const showMerchant = () => {
+    fetchByMerchant(txn.merchant_norm).then(setMerchant).catch(() => setMerchant([]))
   }
 
   return (
     <div className="sheet-backdrop" onClick={onClose}>
       <div className="sheet" onClick={(e) => e.stopPropagation()}>
-        <h2>Add cash spend</h2>
-        <input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-        <input className="input" type="number" inputMode="decimal" placeholder="Amount (e.g. 12.50)" value={amount} onChange={(e) => setAmount(e.target.value)} />
-        <input className="input" placeholder="What was it?" value={description} onChange={(e) => setDescription(e.target.value)} />
-        <select className="input" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
-          <option value="">Category (optional)</option>
-          {categories.map((c) => (
-            <option key={c.id} value={c.id}>{c.icon} {c.name}</option>
-          ))}
-        </select>
-        <button className="btn btn--primary" disabled={busy} onClick={() => void save()}>Save</button>
+        {!editing ? (
+          <>
+            <div className="row--between">
+              <h2>{txn.description}</h2>
+              <span className={`amount ${txn.amount < 0 ? 'amount--neg' : 'amount--pos'}`}>{formatAUD(txn.amount)}</span>
+            </div>
+            <p className="txn__sub" style={{ whiteSpace: 'normal' }}>
+              {formatDayMonth(txn.txn_date)} · {txn.account} · {txn.source === 'manual' ? 'added by hand' : 'imported'}
+              {txn.note && <><br />“{txn.note}”</>}
+            </p>
+            <button className="chip" onClick={() => setPicking(true)}>
+              {cat ? `${cat.icon} ${cat.name}` : '＋ categorise'}{!txn.category_confirmed && cat ? ' (best guess — tap to fix)' : ''}
+            </button>
+            {txn.merchant_norm && (
+              <button className="btn" onClick={showMerchant}>History at this merchant</button>
+            )}
+            {merchant && (
+              <div className="card" style={{ maxHeight: 180, overflowY: 'auto' }}>
+                <h2>{merchant.length} visits · {formatAUD(merchant.reduce((s, t) => s + Math.min(0, t.amount), 0))}</h2>
+                {merchant.map((m) => (
+                  <div key={m.id} className="row--between" style={{ fontSize: '0.8rem', marginBottom: 4 }}>
+                    <span className="muted">{formatDayMonth(m.txn_date)}</span>
+                    <span className="amount">{formatAUD(m.amount)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <button className="btn" onClick={addAgain}>Add again</button>
+            {mine && <button className="btn" onClick={() => setEditing(true)}>Edit</button>}
+            {mine && <button className="btn" style={{ color: 'var(--danger)' }} disabled={busy} onClick={() => void remove()}>Delete</button>}
+          </>
+        ) : (
+          <>
+            <h2>Edit</h2>
+            <SegmentedControl options={[{ value: 'spend', label: 'Spend' }, { value: 'income', label: 'Income' }]} value={kind} onChange={setKind} />
+            <input className="input" type="number" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} />
+            <input className="input" value={description} onChange={(e) => setDescription(e.target.value)} />
+            <input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+            <input className="input" value={account} onChange={(e) => setAccount(e.target.value)} />
+            <input className="input" placeholder="Note (optional)" value={note} onChange={(e) => setNote(e.target.value)} />
+            <button className="btn btn--primary" disabled={busy} onClick={() => void saveEdit()}>Save changes</button>
+          </>
+        )}
       </div>
+      {picking && <CategoryPicker categories={categories} onPick={(id) => void pickCategory(id)} onClose={() => setPicking(false)} />}
     </div>
   )
 }
