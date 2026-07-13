@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatAUD, parseAmount, parseAuDate, parseDayMonDate, isoToday, addDaysIso } from './money'
+import { formatAUD, formatDayMonth, parseAmount, parseAuDate, parseDayMonDate, isoToday, addDaysIso } from './money'
 
 describe('formatAUD', () => {
   it('formats dollars', () => expect(formatAUD(1234.5)).toBe('$1,234.50'))
@@ -31,6 +31,14 @@ describe('parseDayMonDate (NAB "15 Jul 25", Macquarie "05 Mar 2023")', () => {
   it('is case-insensitive', () => expect(parseDayMonDate('5 MAR 2023')).toBe('2023-03-05'))
   it('rejects unknown months', () => expect(parseDayMonDate('5 Foo 2023')).toBeNull())
   it('rejects headers', () => expect(parseDayMonDate('Transaction Date')).toBeNull())
+})
+
+describe('formatDayMonth', () => {
+  const year = new Date().getFullYear()
+  it('renders current-year dates without the year', () =>
+    expect(formatDayMonth(`${year}-07-12`)).toBe('12 Jul'))
+  it('adds a short year for other years', () =>
+    expect(formatDayMonth('2019-03-05')).toBe('5 Mar 19'))
 })
 
 describe('date helpers', () => {

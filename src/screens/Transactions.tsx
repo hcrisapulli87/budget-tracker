@@ -4,7 +4,7 @@ import { useData } from '../data/DataProvider'
 import { fetchTransactions, insertTransactions } from '../data/transactions'
 import { applyCorrection } from '../data/rules'
 import { useRealtime } from '../data/useRealtime'
-import { formatAUD, isoToday } from '../domain/money'
+import { formatAUD, formatDayMonth, isoToday } from '../domain/money'
 import { normaliseMerchant } from '../domain/merchant'
 import { CategoryPicker } from '../components/CategoryPicker'
 import type { Txn } from '../data/types'
@@ -71,9 +71,9 @@ export default function Transactions() {
         <button className="btn btn--small" onClick={() => setAdding(true)}>+ Add</button>
       </div>
       <div className="row--between card">
-        <button className="btn btn--small" onClick={() => setMonth(shiftMonth(month, -1))}>‹</button>
+        <button className="btn btn--small btn--pager" onClick={() => setMonth(shiftMonth(month, -1))}>‹</button>
         <strong>{monthLabel(month)}</strong>
-        <button className="btn btn--small" onClick={() => setMonth(shiftMonth(month, 1))}>›</button>
+        <button className="btn btn--small btn--pager" onClick={() => setMonth(shiftMonth(month, 1))}>›</button>
       </div>
       <div className="row">
         <select className="input" value={who} onChange={(e) => setWho(e.target.value as 'all' | 'mine')}>
@@ -94,16 +94,18 @@ export default function Transactions() {
           <li key={t.id} className="txn">
             <div className="txn__main">
               <div className="txn__desc">{t.description}</div>
-              <div className="txn__sub">{t.txn_date} · {owner(t.owner_id)} · {t.account}</div>
+              <div className="txn__sub">{formatDayMonth(t.txn_date)} · {owner(t.owner_id)} · {t.account}</div>
             </div>
-            <button
-              className={`chip${t.category_confirmed ? ' chip--confirmed' : ''}`}
-              title={t.category_confirmed ? 'Confirmed' : 'Best guess — tap to correct'}
-              onClick={() => setPicking(t)}
-            >
-              {cat(t.category_id) ? `${cat(t.category_id)!.icon} ${cat(t.category_id)!.name}` : '＋ categorise'}
-            </button>
-            <span className={`amount ${t.amount < 0 ? 'amount--neg' : 'amount--pos'}`}>{formatAUD(t.amount)}</span>
+            <div className="txn__side">
+              <span className={`amount ${t.amount < 0 ? 'amount--neg' : 'amount--pos'}`}>{formatAUD(t.amount)}</span>
+              <button
+                className={`chip${t.category_confirmed ? ' chip--confirmed' : ''}`}
+                title={t.category_confirmed ? 'Confirmed' : 'Best guess — tap to correct'}
+                onClick={() => setPicking(t)}
+              >
+                {cat(t.category_id) ? `${cat(t.category_id)!.icon} ${cat(t.category_id)!.name}` : '＋ categorise'}
+              </button>
+            </div>
           </li>
         ))}
         {visible.length === 0 && <p className="muted">No transactions for this view — import a CSV to get started.</p>}

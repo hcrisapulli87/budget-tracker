@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { fetchSubscriptions, setStatus, syncSubscriptions } from '../data/subscriptions'
 import { useAuth } from '../auth/AuthProvider'
 import { useRealtime } from '../data/useRealtime'
-import { formatAUD } from '../domain/money'
+import { formatAUD, formatDayMonth } from '../domain/money'
 import type { Subscription, Cadence } from '../data/types'
 
 const PER_YEAR: Record<Cadence, number> = { weekly: 52, fortnightly: 26, monthly: 12, quarterly: 4, annual: 1 }
@@ -41,7 +41,7 @@ export default function Subscriptions() {
             <div key={s.id} className="txn">
               <div className="txn__main">
                 <div className="txn__desc">{s.name}</div>
-                <div className="txn__sub">{formatAUD(s.amount)} {s.cadence} · next ~{s.next_expected}</div>
+                <div className="txn__sub">{formatAUD(s.amount)} {s.cadence} · next ~{s.next_expected ? formatDayMonth(s.next_expected) : '?'}</div>
               </div>
               <button className="btn btn--small btn--primary" onClick={() => void act(s.id, 'confirmed')}>Yes</button>
               <button className="btn btn--small" onClick={() => void act(s.id, 'dismissed')}>No</button>
@@ -63,9 +63,11 @@ export default function Subscriptions() {
               <div className="txn__main">
                 <div className="txn__desc">{s.name}</div>
                 <div className="txn__sub">
-                  {formatAUD(s.amount)} {s.cadence} · next ~{s.next_expected}
-                  {crept && <span className="badge badge--dup"> was {formatAUD(first)}</span>}
+                  {formatAUD(s.amount)} {s.cadence} · next ~{s.next_expected ? formatDayMonth(s.next_expected) : '?'}
                 </div>
+                {crept && (
+                  <div className="txn__sub"><span className="badge badge--dup">was {formatAUD(first)}</span></div>
+                )}
               </div>
               <button className="btn btn--small" onClick={() => void act(s.id, 'cancelled')}>Cancelled it</button>
             </div>

@@ -8,7 +8,7 @@ import { fetchAccounts } from '../data/accounts'
 import { useRealtime } from '../data/useRealtime'
 import { summarise } from '../domain/analytics'
 import { buildInsights } from '../domain/insights'
-import { formatAUD, isoToday, addDaysIso } from '../domain/money'
+import { formatAUD, formatDayMonth, isoToday, addDaysIso } from '../domain/money'
 import { AccountSheet } from '../components/AccountSheet'
 import type { Account, Subscription, Txn } from '../data/types'
 
@@ -90,7 +90,7 @@ export default function Dashboard() {
     <div className="screen">
       <div className="row--between">
         <h1 className="brand">Tally</h1>
-        <Link to="/settings" aria-label="Settings">⚙️</Link>
+        <Link className="gear" to="/settings" aria-label="Settings">⚙️</Link>
       </div>
       <div className="row">
         <select className="input" value={who} onChange={(e) => setWho(e.target.value as 'all' | 'mine')}>
@@ -108,7 +108,7 @@ export default function Dashboard() {
           <button key={a.id} className="account-row" onClick={() => setAccountSheet({ account: a })}>
             <div className="txn__main">
               <div className="txn__desc">{a.name}</div>
-              <div className="txn__sub">{a.balance_as_of ? `as at ${a.balance_as_of}` : 'no balance yet — tap to set'}</div>
+              <div className="txn__sub">{a.balance_as_of ? `as at ${formatDayMonth(a.balance_as_of)}` : 'no balance yet — tap to set'}</div>
             </div>
             <span className="amount">{a.balance != null ? formatAUD(a.balance) : '—'}</span>
           </button>
@@ -126,14 +126,10 @@ export default function Dashboard() {
 
       <div className="card">
         <h2>This month</h2>
-        <div className="row--between">
-          <div>
-            <div className="stat">{formatAUD(cur.spend)}</div>
-            <div className="muted">spent · {formatAUD(cur.income)} in</div>
-          </div>
-          <div className={delta <= 0 ? 'amount--pos' : 'error'}>
-            {delta <= 0 ? '▼' : '▲'} {formatAUD(Math.abs(delta))} vs last month (to same day)
-          </div>
+        <div className="stat">{formatAUD(cur.spend)}</div>
+        <div className="muted">spent · {formatAUD(cur.income)} in</div>
+        <div className={`delta ${delta <= 0 ? 'amount--pos' : 'error'}`}>
+          {delta <= 0 ? '▼' : '▲'} {formatAUD(Math.abs(delta))} vs last month to the same day
         </div>
         <svg viewBox={`0 0 ${cur.byDay.length * 6} 40`} width="100%" height="40" preserveAspectRatio="none" aria-label="Daily spending">
           {cur.byDay.map((d, i) => (
@@ -146,10 +142,10 @@ export default function Dashboard() {
         <h2>By category</h2>
         {cur.byCategory.map((c) => (
           <div key={c.categoryId ?? 'none'} className="row" style={{ marginBottom: 6 }}>
-            <span style={{ width: 130, fontSize: '0.85rem' }}>
+            <span className="cat-label">
               {cat(c.categoryId) ? `${cat(c.categoryId)!.icon} ${cat(c.categoryId)!.name}` : '❓ Uncategorised'}
             </span>
-            <div className="bar" style={{ width: `${(c.total / maxCat) * 55}%`, background: cat(c.categoryId)?.colour ?? '#9aa5b1' }} />
+            <div className="bar" style={{ width: `${(c.total / maxCat) * 42}%`, background: cat(c.categoryId)?.colour ?? '#9aa5b1' }} />
             <span className="txn__sub amount">{formatAUD(c.total)}</span>
           </div>
         ))}

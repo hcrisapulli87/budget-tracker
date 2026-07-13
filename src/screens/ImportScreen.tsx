@@ -8,7 +8,7 @@ import { assignKeys } from '../domain/importKey'
 import type { KeyedTxn } from '../domain/importKey'
 import { normaliseMerchant } from '../domain/merchant'
 import { matchRule } from '../domain/ruleEngine'
-import { formatAUD } from '../domain/money'
+import { formatAUD, formatDayMonth } from '../domain/money'
 import { createImport, fetchImports } from '../data/imports'
 import { existingKeys, insertTransactions } from '../data/transactions'
 import { syncSubscriptions } from '../data/subscriptions'
@@ -42,6 +42,15 @@ export default function ImportScreen() {
   }, [result])
 
   const knownAccount = accounts.some((a) => !a.is_archived && a.name === account.trim())
+
+  // Nothing remembered yet → preselect the first real account instead of "New".
+  useEffect(() => {
+    if (!account && accounts.length > 0) {
+      const first = accounts.find((a) => !a.is_archived)
+      if (first) setAccount(first.name)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accounts])
 
   const profile = useMemo(
     () => (profileId === 'generic' ? genericProfile(mapping) : BANK_PROFILES.find((p) => p.id === profileId) ?? BANK_PROFILES[0]),
@@ -197,22 +206,24 @@ export default function ImportScreen() {
               {busy ? 'Importing…' : `Import ${preview.filter((r) => !r.duplicate).length} new`}
             </button>
           </div>
-          <table className="preview">
-            <thead>
-              <tr><th>Date</th><th>Description</th><th>Amount</th><th>Category (guess)</th><th></th></tr>
-            </thead>
-            <tbody>
-              {preview.map((r) => (
-                <tr key={r.key}>
-                  <td>{r.txn.dateIso}</td>
-                  <td>{r.txn.description}</td>
-                  <td className="amount">{formatAUD(r.txn.amount)}</td>
-                  <td>{catName(r.categoryId)}</td>
-                  <td>{r.duplicate ? <span className="badge badge--dup">dup</span> : <span className="badge badge--new">new</span>}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="table-scroll">
+            <table className="preview">
+              <thead>
+                <tr><th>Date</th><th>Description</th><th>Amount</th><th>Category (guess)</th><th></th></tr>
+              </thead>
+              <tbody>
+                {preview.map((r) => (
+                  <tr key={r.key}>
+                    <td>{formatDayMonth(r.txn.dateIso)}</td>
+                    <td>{r.txn.description}</td>
+                    <td className="amount">{formatAUD(r.txn.amount)}</td>
+                    <td>{catName(r.categoryId)}</td>
+                    <td>{r.duplicate ? <span className="badge badge--dup">dup</span> : <span className="badge badge--new">new</span>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
@@ -224,7 +235,7 @@ export default function ImportScreen() {
               <li key={h.id} className="txn">
                 <div className="txn__main">
                   <div className="txn__desc">{h.filename} → {h.account}</div>
-                  <div className="txn__sub">{h.imported_at.slice(0, 10)} — {h.new_count} new, {h.duplicate_count} dup</div>
+                  <div className="txn__sub">{formatDayMonth(h.imported_at.slice(0, 10))} — {h.new_count} new, {h.duplicate_count} dup</div>
                 </div>
               </li>
             ))}

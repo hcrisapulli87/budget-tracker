@@ -4,7 +4,7 @@ import { addBill, deleteBill, fetchBills, updateBill } from '../data/bills'
 import { fetchTransactions } from '../data/transactions'
 import { useRealtime } from '../data/useRealtime'
 import { advanceDue, suggestMatch } from '../domain/billing'
-import { addDaysIso, formatAUD, isoToday } from '../domain/money'
+import { addDaysIso, formatAUD, formatDayMonth, isoToday } from '../domain/money'
 import type { Bill, BillFrequency } from '../data/types'
 
 export default function Bills() {
@@ -44,7 +44,7 @@ export default function Bills() {
               <div className="txn__desc">{b.name} {b.autopay && <span className="badge">autopay</span>}</div>
               <div className="txn__sub">
                 {formatAUD(b.amount)}{b.is_estimate ? ' (est.)' : ''} · {b.frequency} ·{' '}
-                <span className={overdue(b) ? 'error' : ''}>due {b.next_due}</span>
+                <span className={overdue(b) ? 'error' : ''}>due {formatDayMonth(b.next_due)}</span>
               </div>
             </div>
             <button className="btn btn--small" onClick={() => setEditing(b)}>Edit</button>

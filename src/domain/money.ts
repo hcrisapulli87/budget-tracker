@@ -40,6 +40,15 @@ export function parseDayMonDate(raw: string): string | null {
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
 }
 
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/** ISO yyyy-mm-dd → compact display date: "12 Jul", or "12 Jul 25" for other years. */
+export function formatDayMonth(iso: string): string {
+  const [y, m, d] = iso.split('-').map(Number)
+  const suffix = y === new Date().getFullYear() ? '' : ` ${String(y).slice(2)}`
+  return `${d} ${MONTH_NAMES[m - 1]}${suffix}`
+}
+
 export function isoToday(): string {
   return new Date().toISOString().slice(0, 10)
 }
