@@ -11,6 +11,7 @@ import { matchRule } from '../domain/ruleEngine'
 import { formatAUD } from '../domain/money'
 import { createImport, fetchImports } from '../data/imports'
 import { existingKeys, insertTransactions } from '../data/transactions'
+import { syncSubscriptions } from '../data/subscriptions'
 import type { ImportRecord } from '../data/types'
 
 interface PreviewRow extends KeyedTxn {
@@ -104,7 +105,11 @@ export default function ImportScreen() {
           import_id: record.id,
         })),
       )
-      setResult(`${fresh.length} new, ${preview.length - fresh.length} duplicates skipped.`)
+      const found = await syncSubscriptions(user.id)
+      setResult(
+        `${fresh.length} new, ${preview.length - fresh.length} duplicates skipped.` +
+          (found ? ` ${found} possible subscription${found > 1 ? 's' : ''} spotted — check the Subs tab.` : ''),
+      )
       setPreview(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Import failed.')
