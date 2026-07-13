@@ -1,5 +1,6 @@
 import { Routes, Route } from 'react-router-dom'
 import { useAuth } from './auth/AuthProvider'
+import { DataProvider } from './data/DataProvider'
 import { Layout } from './components/Layout'
 import Login from './screens/Login'
 import Dashboard from './screens/Dashboard'
@@ -20,15 +21,17 @@ export default function App() {
   }
   if (!session) return <Login />
   return (
-    <Routes>
-      <Route element={<Layout />}>
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/transactions" element={<Transactions />} />
-        <Route path="/import" element={<ImportScreen />} />
-        <Route path="/subscriptions" element={<Subscriptions />} />
-        <Route path="/bills" element={<Bills />} />
-        <Route path="/settings" element={<Settings />} />
-      </Route>
-    </Routes>
+    <DataProvider>
+      <Routes>
+        <Route element={<Layout />}>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/transactions" element={<Transactions />} />
+          <Route path="/import" element={<ImportScreen />} />
+          <Route path="/subscriptions" element={<Subscriptions />} />
+          <Route path="/bills" element={<Bills />} />
+          <Route path="/settings" element={<Settings />} />
+        </Route>
+      </Routes>
+    </DataProvider>
   )
 }
