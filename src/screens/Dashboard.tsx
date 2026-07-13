@@ -3,10 +3,12 @@ import { Link } from 'react-router-dom'
 import { useAuth } from '../auth/AuthProvider'
 import { useData } from '../data/DataProvider'
 import { fetchTransactions } from '../data/transactions'
+import { fetchSubscriptions } from '../data/subscriptions'
 import { useRealtime } from '../data/useRealtime'
 import { summarise } from '../domain/analytics'
+import { buildInsights } from '../domain/insights'
 import { formatAUD, isoToday, addDaysIso } from '../domain/money'
-import type { Txn } from '../data/types'
+import type { Subscription, Txn } from '../data/types'
 
 function shift(iso: string, delta: number): string {
   const [y, m] = iso.split('-').map(Number)
@@ -23,15 +25,18 @@ export default function Dashboard() {
   const { user } = useAuth()
   const { categories } = useData()
   const [txns, setTxns] = useState<Txn[]>([])
+  const [subs, setSubs] = useState<Subscription[]>([])
   const [who, setWho] = useState<'all' | 'mine'>('all')
   const month = isoToday().slice(0, 7)
   const prevMonth = shift(month, -1)
 
   const load = useCallback(() => {
-    fetchTransactions(`${prevMonth}-01`, monthBounds(month).to).then(setTxns).catch(() => setTxns([]))
-  }, [month, prevMonth])
+    // 4 months back feeds the spike insight's 3-month rolling average.
+    fetchTransactions(`${shift(month, -3)}-01`, monthBounds(month).to).then(setTxns).catch(() => setTxns([]))
+    fetchSubscriptions().then(setSubs).catch(() => setSubs([]))
+  }, [month])
   useEffect(load, [load])
-  useRealtime(['budget_transactions'], load)
+  useRealtime(['budget_transactions', 'budget_subscriptions'], load)
 
   const mine = useMemo(
     () => (who === 'all' ? txns : txns.filter((t) => t.owner_id === user?.id)),
@@ -46,6 +51,32 @@ export default function Dashboard() {
   const dayOfMonth = Number(isoToday().slice(8, 10))
   const prevToSameDay = summarise(mine, `${prevMonth}-01`, addDaysIso(`${prevMonth}-01`, dayOfMonth - 1))
   const delta = cur.spend - prevToSameDay.spend
+
+  const monthly = useMemo(() => {
+    const months = [shift(month, -3), shift(month, -2), shift(month, -1), month]
+    const byCat = new Map<string, number[]>()
+    months.forEach((m, idx) => {
+      const s = summarise(mine, monthBounds(m).from, monthBounds(m).to)
+      for (const c of s.byCategory) {
+        if (!c.categoryId) continue
+        const arr = byCat.get(c.categoryId) ?? [0, 0, 0, 0]
+        arr[idx] = c.total
+        byCat.set(c.categoryId, arr)
+      }
+    })
+    return [...byCat.entries()].map(([categoryId, totals]) => ({ categoryId, totals }))
+  }, [mine, month])
+
+  const insights = useMemo(
+    () =>
+      buildInsights({
+        categoryNames: new Map(categories.map((c) => [c.id, c.name])),
+        monthlyByCategory: monthly,
+        subs,
+        today: isoToday(),
+      }),
+    [monthly, subs, categories],
+  )
 
   return (
     <div className="screen">
@@ -92,6 +123,21 @@ export default function Dashboard() {
         {cur.byCategory.length === 0 && <p className="muted">Nothing yet this month.</p>}
         <p className="txn__sub">Categories are best guesses until you confirm them in Activity.</p>
       </div>
+
+      {insights.length > 0 && (
+        <div className="card">
+          <h2>Worth a look <span className="badge">observations, not verdicts</span></h2>
+          <ul className="list-plain">
+            {insights.map((i, idx) => (
+              <li key={idx} className="txn">
+                <div className="txn__main">
+                  <div className="txn__desc">{i.message}</div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   )
 }
