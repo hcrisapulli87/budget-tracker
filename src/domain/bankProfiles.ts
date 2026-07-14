@@ -12,7 +12,8 @@ export interface BankProfile {
   id: string
   label: string
   hasHeader: boolean
-  parse(cols: string[]): ParsedTxn | null
+  /** header is the raw header row when hasHeader — profiles whose banks move columns between exports resolve indices from it. */
+  parse(cols: string[], header?: string[]): ParsedTxn | null
 }
 
 function parseDate(raw: string, style: 'dmy' | 'iso'): string | null {
@@ -75,14 +76,24 @@ export const BANK_PROFILES: BankProfile[] = [
   },
   {
     id: 'macquarie',
+    // Macquarie's column set varies between exports (Tags/Notes/Original
+    // Description come and go), so positions are resolved from the header row.
     label: 'Macquarie (Date, Details, …, Debit, Credit, Balance)',
     hasHeader: true,
-    parse(cols) {
-      if (cols.length < 8) return null
+    parse(cols, header) {
+      const col = (name: string) => header?.findIndex((h) => h.trim().toLowerCase() === name) ?? -1
+      const debitIdx = col('debit')
+      const creditIdx = col('credit')
+      if (debitIdx < 0 || creditIdx < 0) return null
       const dateIso = parseDayMonDate(cols[0]) ?? parseAuDate(cols[0])
-      const amount = signedFrom(cols[6], cols[7])
+      const amount = signedFrom(cols[debitIdx], cols[creditIdx])
       if (!dateIso || amount === null) return null
-      return { dateIso, amount, description: cols[1].trim(), balance: balanceFrom(cols[8]) }
+      // "Original Description" is the stable bank narrative; "Details" embeds
+      // per-transaction receipt numbers that would defeat merchant rules.
+      const origIdx = col('original description')
+      const description = (origIdx >= 0 ? cols[origIdx]?.trim() : '') || cols[1].trim()
+      const balanceIdx = col('balance')
+      return { dateIso, amount, description, balance: balanceIdx >= 0 ? balanceFrom(cols[balanceIdx]) : undefined }
     },
   },
   {
@@ -132,8 +143,9 @@ export function genericProfile(m: ColumnMapping): BankProfile {
 }
 
 export function applyProfile(rows: string[][], profile: BankProfile): ParsedTxn[] {
+  const header = profile.hasHeader ? rows[0] : undefined
   const body = profile.hasHeader ? rows.slice(1) : rows
-  return body.map((r) => profile.parse(r)).filter((t): t is ParsedTxn => t !== null)
+  return body.map((r) => profile.parse(r, header)).filter((t): t is ParsedTxn => t !== null)
 }
 
 /**

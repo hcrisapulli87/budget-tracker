@@ -63,8 +63,19 @@ describe('nab profile (Date, Amount, Account, blank, Type, Details, Balance — 
   })
 })
 
-describe('macquarie profile (header; Date, Details, Account, Category, ..., Debit, Credit, Balance)', () => {
-  it('skips header, maps debit/credit with "05 Mar 2023" dates', () => {
+describe('macquarie profile (header-driven; column set varies between exports)', () => {
+  it('parses the real 11-column export (Tags + Notes + Original Description)', () => {
+    const rows = [
+      ['Transaction Date', 'Details', 'Account', 'Category', 'Subcategory', 'Tags', 'Notes', 'Debit', 'Credit', 'Balance', 'Original Description'],
+      ['12 Jul 2026', 'To Harrison Westpac Account - Funds Transfer Receipt number: ON0000216372037 Payment description: Funds transfer', 'Macquarie Savings Account', 'Financial', 'Transfers', '', '', '200', '', '5415.5', 'To Harrison Westpac account - Funds transfer'],
+      ['30 Jun 2026', 'Payment', 'Macquarie Savings Account', 'Income', 'Interest', 'tax', '', '', '19.15', '5765.5', 'Payment'],
+    ]
+    expect(applyProfile(rows, macquarie)).toEqual([
+      { dateIso: '2026-07-12', amount: -200, description: 'To Harrison Westpac account - Funds transfer', balance: 5415.5 },
+      { dateIso: '2026-06-30', amount: 19.15, description: 'Payment', balance: 5765.5 },
+    ])
+  })
+  it('still parses the older 10-column layout (no Tags, no Original Description)', () => {
     const rows = [
       ['Transaction Date', 'Details', 'Account', 'Category', 'Sub Category', 'Notes', 'Debit', 'Credit', 'Balance', ''],
       ['05 Mar 2023', 'UBER *EATS', 'Transaction', 'Eating out', '', '', '24.90', '', '812.10', ''],
