@@ -22,6 +22,8 @@ export default function Recurring() {
   const [view, setView] = useState<View>('monthly')
   const [editing, setEditing] = useState<Bill | 'new' | null>(null)
   const [note, setNote] = useState('')
+  const [scanning, setScanning] = useState(false)
+  const [scanNote, setScanNote] = useState('')
 
   const load = useCallback(() => {
     fetchSubscriptions().then(setSubs).catch(() => setSubs([]))
@@ -51,12 +53,36 @@ export default function Recurring() {
   const soon = bills.filter((b) => b.next_due <= addDaysIso(isoToday(), 7))
   const overdue = (b: Bill) => b.next_due < isoToday()
 
+  const rescan = async () => {
+    if (!user || scanning) return
+    setScanning(true)
+    setScanNote('')
+    try {
+      const found = await syncSubscriptions(user.id)
+      load()
+      setScanNote(
+        found > 0
+          ? `Found ${found} new subscription${found > 1 ? 's' : ''} — review below.`
+          : 'No new subscriptions — a merchant needs ≥3 similar charges before it counts as one.',
+      )
+    } catch {
+      setScanNote('Scan failed — try again in a moment.')
+    } finally {
+      setScanning(false)
+    }
+  }
+
   return (
     <div className="screen">
       <div className="row--between">
         <h1 className="brand">Recurring</h1>
-        {user && <button className="btn btn--small" onClick={() => void syncSubscriptions(user.id).then(load)}>Re-scan</button>}
+        {user && (
+          <button className="btn btn--small" disabled={scanning} onClick={() => void rescan()}>
+            {scanning ? 'Scanning…' : 'Re-scan'}
+          </button>
+        )}
       </div>
+      {scanNote && <p className="txn__sub" style={{ whiteSpace: 'normal' }}>{scanNote}</p>}
 
       {candidates.length > 0 && (
         <div className="card">
