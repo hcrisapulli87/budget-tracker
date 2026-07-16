@@ -2,11 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthProvider'
 import { useData } from '../data/DataProvider'
-import { deleteTransaction, fetchByMerchant, fetchTransactions, searchTransactions, updateTransaction } from '../data/transactions'
+import { bulkSetCategory, deleteTransaction, fetchByMerchant, fetchTransactions, fetchUnconfirmed, searchTransactions, updateTransaction } from '../data/transactions'
 import { applyCorrection } from '../data/rules'
 import { useRealtime } from '../data/useRealtime'
 import { formatAUD, formatDayMonth, isoToday } from '../domain/money'
 import { normaliseMerchant } from '../domain/merchant'
+import { matchRule } from '../domain/ruleEngine'
 import { groupByDay } from '../domain/grouping'
 import { useWho } from '../lib/useWho'
 import { CategoryPicker } from '../components/CategoryPicker'
@@ -32,7 +33,7 @@ function monthBounds(iso: string): { from: string; to: string } {
 
 export default function Transactions() {
   const { user } = useAuth()
-  const { categories, profiles } = useData()
+  const { categories, profiles, rules } = useData()
   const [month, setMonth] = useState(() => isoToday().slice(0, 7))
   const [txns, setTxns] = useState<Txn[]>([])
   const [who, setWho] = useWho()
@@ -40,6 +41,8 @@ export default function Transactions() {
   const [search, setSearch] = useState('')
   const [results, setResults] = useState<Txn[] | null>(null)
   const [detail, setDetail] = useState<Txn | null>(null)
+  const [rescanning, setRescanning] = useState(false)
+  const [rescanNote, setRescanNote] = useState('')
 
   const searching = search.trim().length >= 2
 
@@ -71,12 +74,54 @@ export default function Transactions() {
   const cat = (id: string | null) => categories.find((c) => c.id === id)
   const owner = (id: string) => profiles.find((p) => p.id === id)?.display_name ?? '?'
 
+  // Re-apply learned rules to every still-unconfirmed transaction — corrections
+  // made since import get to categorise the backlog, not just future imports.
+  const rescan = async () => {
+    if (rescanning) return
+    setRescanning(true)
+    setRescanNote('')
+    try {
+      const rows = await fetchUnconfirmed()
+      const updates = new Map<string, string[]>() // category id → txn ids
+      for (const r of rows) {
+        const norm = r.merchant_norm || normaliseMerchant(r.description)
+        const match = matchRule(norm, rules)
+        if (match && match.category_id !== r.category_id) {
+          const ids = updates.get(match.category_id) ?? []
+          ids.push(r.id)
+          updates.set(match.category_id, ids)
+        }
+      }
+      let changed = 0
+      for (const [categoryId, ids] of updates) {
+        await bulkSetCategory(ids, categoryId)
+        changed += ids.length
+      }
+      load()
+      setRescanNote(
+        changed > 0
+          ? `Re-categorised ${changed} transaction${changed > 1 ? 's' : ''} from your corrections.`
+          : 'Nothing new to categorise — fixing a category on any transaction teaches the next re-scan.',
+      )
+    } catch {
+      setRescanNote('Re-scan failed — try again in a moment.')
+    } finally {
+      setRescanning(false)
+    }
+  }
+
   return (
     <div className="screen">
       <div className="row--between">
         <h1 className="brand">Activity</h1>
-        <Link to="/import" className="gear" aria-label="Import CSV">⤓</Link>
+        <div className="row" style={{ gap: 8 }}>
+          <button className="btn btn--small" disabled={rescanning} onClick={() => void rescan()}>
+            {rescanning ? 'Scanning…' : 'Re-scan'}
+          </button>
+          <Link to="/import" className="gear" aria-label="Import CSV">⤓</Link>
+        </div>
       </div>
+      {rescanNote && <p className="txn__sub" style={{ whiteSpace: 'normal' }}>{rescanNote}</p>}
       <input className="input" placeholder="Search everything…" value={search} onChange={(e) => setSearch(e.target.value)} />
       <div className="row" style={{ margin: '10px 0' }}>
         <SegmentedControl options={[{ value: 'mine', label: 'Me' }, { value: 'all', label: 'Both' }]} value={who} onChange={setWho} />

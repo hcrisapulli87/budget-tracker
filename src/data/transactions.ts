@@ -82,6 +82,27 @@ export async function searchTransactions(term: string): Promise<Txn[]> {
   return (data ?? []) as Txn[]
 }
 
+/** Every transaction whose category is still a guess (or missing) — re-scan fodder. */
+export async function fetchUnconfirmed(): Promise<Pick<Txn, 'id' | 'description' | 'merchant_norm' | 'category_id'>[]> {
+  const { data, error } = await supabase
+    .from('budget_transactions')
+    .select('id, description, merchant_norm, category_id')
+    .eq('category_confirmed', false)
+  if (error) throw error
+  return (data ?? []) as Pick<Txn, 'id' | 'description' | 'merchant_norm' | 'category_id'>[]
+}
+
+/** Set one category across many rows (chunked — PostgREST `in` limits). */
+export async function bulkSetCategory(ids: string[], categoryId: string): Promise<void> {
+  for (let i = 0; i < ids.length; i += 200) {
+    const { error } = await supabase
+      .from('budget_transactions')
+      .update({ category_id: categoryId })
+      .in('id', ids.slice(i, i + 200))
+    if (error) throw error
+  }
+}
+
 export async function fetchByMerchant(merchantNorm: string): Promise<Txn[]> {
   const { data, error } = await supabase
     .from('budget_transactions')
