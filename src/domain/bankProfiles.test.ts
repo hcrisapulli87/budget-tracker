@@ -25,8 +25,8 @@ describe('westpac profile (header; Debit/Credit columns)', () => {
       ['032000123456', '25/06/2026', 'SALARY', '', '2500.00', '3000.00', '', ''],
     ]
     expect(applyProfile(rows, westpac)).toEqual([
-      { dateIso: '2026-06-23', amount: -18.99, description: 'NETFLIX.COM', balance: 500 },
-      { dateIso: '2026-06-25', amount: 2500, description: 'SALARY', balance: 3000 },
+      { dateIso: '2026-06-23', amount: -18.99, description: 'NETFLIX.COM', balance: 500, accountRef: '032000123456' },
+      { dateIso: '2026-06-25', amount: 2500, description: 'SALARY', balance: 3000, accountRef: '032000123456' },
     ])
   })
 })
@@ -50,8 +50,8 @@ describe('nab profile (Date, Amount, Account, blank, Type, Details, Balance — 
       ['16 Jul 25', '2500.00', '083004123456789', '', 'TRANSFER CREDIT', 'SALARY ACME PTY LTD', '+3967.20'],
     ]
     expect(applyProfile(rows, nab)).toEqual([
-      { dateIso: '2025-07-15', amount: -32.8, description: 'WOOLWORTHS 1234 MELBOURNE', balance: 1467.2 },
-      { dateIso: '2025-07-16', amount: 2500, description: 'SALARY ACME PTY LTD', balance: 3967.2 },
+      { dateIso: '2025-07-15', amount: -32.8, description: 'WOOLWORTHS 1234 MELBOURNE', balance: 1467.2, accountRef: '083004123456789' },
+      { dateIso: '2025-07-16', amount: 2500, description: 'SALARY ACME PTY LTD', balance: 3967.2, accountRef: '083004123456789' },
     ])
   })
   it('tolerates an accidental header row', () => {
@@ -120,6 +120,18 @@ describe('genericProfile', () => {
       ['2026-06-23', 'THING', '-9.00'],
     ]
     expect(applyProfile(rows, p)).toEqual([{ dateIso: '2026-06-23', amount: -9, description: 'THING' }])
+  })
+  it('extracts per-row account identifiers from mapped BSB + account columns', () => {
+    const p = genericProfile({ hasHeader: false, dateCol: 0, descCol: 1, amountCol: 2, dateStyle: 'dmy', bsbCol: 3, accountCol: 4 })
+    expect(applyProfile([['23/06/2026', 'X', '-9.00', '062-692', '1234 5678']], p)).toEqual([
+      { dateIso: '2026-06-23', amount: -9, description: 'X', accountRef: '06269212345678' },
+    ])
+  })
+  it('single account column alone also works', () => {
+    const p = genericProfile({ hasHeader: false, dateCol: 0, descCol: 1, amountCol: 2, dateStyle: 'dmy', accountCol: 3 })
+    expect(applyProfile([['23/06/2026', 'X', '-9.00', '06269212345678']], p)).toEqual([
+      { dateIso: '2026-06-23', amount: -9, description: 'X', accountRef: '06269212345678' },
+    ])
   })
   it('maps split debit/credit columns', () => {
     const p = genericProfile({ hasHeader: false, dateCol: 0, descCol: 1, debitCol: 2, creditCol: 3, dateStyle: 'dmy' })

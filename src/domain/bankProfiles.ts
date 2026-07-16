@@ -6,6 +6,17 @@ export interface ParsedTxn {
   description: string
   /** Running account balance after this transaction, when the export includes one. */
   balance?: number
+  /**
+   * The row's own account identifier (BSB + account number digits), when the
+   * export is a combined multi-account file. Undefined for single-account exports.
+   */
+  accountRef?: string
+}
+
+/** Digits of a row's account identifier column(s) — undefined when there are none. */
+function accountRefFrom(...raws: (string | undefined)[]): string | undefined {
+  const ref = raws.map((r) => (r ?? '').replace(/\D/g, '')).join('')
+  return ref === '' ? undefined : ref
 }
 
 export interface BankProfile {
@@ -58,7 +69,7 @@ export const BANK_PROFILES: BankProfile[] = [
       const dateIso = parseAuDate(cols[1])
       const amount = signedFrom(cols[3], cols[4])
       if (!dateIso || amount === null) return null
-      return { dateIso, amount, description: cols[2].trim(), balance: balanceFrom(cols[5]) }
+      return { dateIso, amount, description: cols[2].trim(), balance: balanceFrom(cols[5]), accountRef: accountRefFrom(cols[0]) }
     },
   },
   {
@@ -71,7 +82,7 @@ export const BANK_PROFILES: BankProfile[] = [
       const dateIso = parseDayMonDate(cols[0]) ?? parseAuDate(cols[0])
       const amount = parseAmount(cols[1])
       if (!dateIso || amount === null) return null
-      return { dateIso, amount, description: cols[5].trim(), balance: balanceFrom(cols[6]) }
+      return { dateIso, amount, description: cols[5].trim(), balance: balanceFrom(cols[6]), accountRef: accountRefFrom(cols[2]) }
     },
   },
   {
@@ -118,6 +129,9 @@ export interface ColumnMapping {
   debitCol?: number
   creditCol?: number
   dateStyle: 'dmy' | 'iso'
+  /** Combined multi-account files: which column(s) identify the row's account. */
+  bsbCol?: number
+  accountCol?: number
 }
 
 /** "Map your own columns" fallback for any bank export we don't have a preset for. */
@@ -137,7 +151,15 @@ export function genericProfile(m: ColumnMapping): BankProfile {
               m.creditCol !== undefined ? cols[m.creditCol] : undefined,
             )
       if (!dateIso || amount === null || !description) return null
-      return { dateIso, amount, description }
+      return {
+        dateIso,
+        amount,
+        description,
+        accountRef: accountRefFrom(
+          m.bsbCol !== undefined ? cols[m.bsbCol] : undefined,
+          m.accountCol !== undefined ? cols[m.accountCol] : undefined,
+        ),
+      }
     },
   }
 }
