@@ -46,3 +46,14 @@ export function formatBsb(bsb: string | null | undefined): string {
   const d = digitsOf(bsb)
   return d.length === 6 ? `${d.slice(0, 3)}-${d.slice(3)}` : d
 }
+
+/**
+ * Best-effort split of a combined identifier into BSB + account number.
+ * AU BSBs are always 6 digits and account numbers 6–10, so refs of 12+ digits
+ * are BSB-prefixed; anything shorter is an account number on its own.
+ */
+export function splitRef(ref: string): { bsb: string | null; accountNumber: string } {
+  return ref.length >= 12
+    ? { bsb: ref.slice(0, 6), accountNumber: ref.slice(6) }
+    : { bsb: null, accountNumber: ref }
+}

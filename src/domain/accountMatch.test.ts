@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { digitsOf, formatBsb, groupByAccountRef, matchAccountByRef } from './accountMatch'
+import { digitsOf, formatBsb, groupByAccountRef, matchAccountByRef, splitRef } from './accountMatch'
 import type { Account } from '../data/types'
 
 function account(over: Partial<Account>): Account {
@@ -60,6 +60,16 @@ describe('matchAccountByRef', () => {
     expect(matchAccountByRef('', [everyday, savings])).toBeUndefined()
     expect(matchAccountByRef('11112222', [account({ ...everyday, is_archived: true })])).toBeUndefined()
     expect(matchAccountByRef('11112222', [account({ name: 'NoNumber' })])).toBeUndefined()
+  })
+})
+
+describe('splitRef', () => {
+  it('splits 12+ digit refs into 6-digit BSB + remainder', () => {
+    expect(splitRef('032000123456')).toEqual({ bsb: '032000', accountNumber: '123456' })
+    expect(splitRef('083004123456789')).toEqual({ bsb: '083004', accountNumber: '123456789' })
+  })
+  it('treats shorter refs as account number alone', () => {
+    expect(splitRef('12345678')).toEqual({ bsb: null, accountNumber: '12345678' })
   })
 })
 
