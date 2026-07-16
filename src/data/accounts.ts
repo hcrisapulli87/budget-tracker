@@ -17,10 +17,20 @@ export async function createAccount(
   balance: number | null = null,
   asOfIso: string | null = null,
   goal: number | null = null,
+  bsb: string | null = null,
+  accountNumber: string | null = null,
 ): Promise<void> {
   const { error } = await supabase
     .from('budget_accounts')
-    .insert({ name: name.trim(), owner_id: ownerId, balance, balance_as_of: balance === null ? null : asOfIso, goal_amount: goal })
+    .insert({
+      name: name.trim(),
+      owner_id: ownerId,
+      balance,
+      balance_as_of: balance === null ? null : asOfIso,
+      goal_amount: goal,
+      bsb,
+      account_number: accountNumber,
+    })
   if (error) throw error
 }
 
@@ -30,6 +40,8 @@ export interface AccountPatch {
   balance_as_of?: string | null
   is_archived?: boolean
   goal_amount?: number | null
+  bsb?: string | null
+  account_number?: string | null
 }
 
 export async function updateAccount(id: string, patch: AccountPatch): Promise<void> {

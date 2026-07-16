@@ -96,6 +96,12 @@ alter table public.budget_transactions add column if not exists note text not nu
 alter table public.budget_accounts     add column if not exists goal_amount numeric(12,2);
 alter table public.budget_categories   add column if not exists exclude_from_analytics boolean not null default false;
 
+-- ── v4 additive changes ───────────────────────────────────────────────────────
+-- BSB + account number let a combined multi-account CSV route each row to the
+-- right account at import time (rows are matched on the bsb/account pair).
+alter table public.budget_accounts add column if not exists bsb text;
+alter table public.budget_accounts add column if not exists account_number text;
+
 -- Per-category monthly budgets (household-wide; set once, tracked automatically).
 create table if not exists public.budget_budgets (
   id            uuid primary key default gen_random_uuid(),

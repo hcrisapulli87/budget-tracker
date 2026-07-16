@@ -65,6 +65,8 @@ export interface Account {
   sort_order: number
   is_archived: boolean
   goal_amount: number | null
+  bsb: string | null
+  account_number: string | null
 }
 
 export type BillFrequency = 'monthly' | 'quarterly' | 'annual'
