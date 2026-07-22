@@ -11,7 +11,8 @@ import { formatAUD, formatDayMonth, isoToday } from '../domain/money'
 import { StatCard } from '../components/ui/StatCard'
 import { SegmentedControl } from '../components/ui/SegmentedControl'
 import { EmptyState } from '../components/ui/EmptyState'
-import type { DeductionCategory, IncomeSourceType, TaxDeduction, TaxIncome, Txn } from '../data/types'
+import { listDocuments, uploadDocument, deleteDocument, getSignedUrl } from '../data/taxDocuments'
+import type { DeductionCategory, IncomeSourceType, TaxDeduction, TaxDocument, TaxIncome, Txn } from '../data/types'
 
 const SOURCE_TYPES: { value: IncomeSourceType; label: string }[] = [
   { value: 'salary', label: 'Salary' },
@@ -36,14 +37,29 @@ export default function TaxScreen() {
   const [income, setIncome] = useState<TaxIncome[]>([])
   const [manualDeductions, setManualDeductions] = useState<TaxDeduction[]>([])
   const [taggedDeductions, setTaggedDeductions] = useState<Txn[]>([])
+  const [documents, setDocuments] = useState<TaxDocument[]>([])
+  const [uploading, setUploading] = useState(false)
+  const [docDetail, setDocDetail] = useState<TaxDocument | null>(null)
 
   const load = useCallback(() => {
     fetchIncome(fy).then(setIncome).catch(() => setIncome([]))
     fetchManualDeductions(fy).then(setManualDeductions).catch(() => setManualDeductions([]))
     fetchTaggedDeductions(fy).then(setTaggedDeductions).catch(() => setTaggedDeductions([]))
+    listDocuments(fy).then(setDocuments).catch(() => setDocuments([]))
   }, [fy])
   useEffect(load, [load])
-  useRealtime(['tax_income', 'tax_deductions', 'budget_transactions'], load)
+  useRealtime(['tax_income', 'tax_deductions', 'tax_documents', 'budget_transactions'], load)
+
+  const onUpload = async (file: File | undefined) => {
+    if (!file || !user) return
+    setUploading(true)
+    try {
+      await uploadDocument(file, { owner_id: user.id, fy, title: file.name, doc_type: 'receipt', link_type: 'none' })
+      load()
+    } finally {
+      setUploading(false)
+    }
+  }
 
   const totalIncome = useMemo(() => income.reduce((s, i) => s + i.amount, 0), [income])
   const totalDeductions = useMemo(
@@ -132,6 +148,37 @@ export default function TaxScreen() {
           <EmptyState icon="🧾" title="No deductions yet" hint="Add one, or tag a Tally transaction as deductible." />
         )}
       </div>
+
+      <div className="card">
+        <div className="row--between">
+          <h2>Documents</h2>
+          <label className="btn btn--small" style={{ cursor: 'pointer' }}>
+            {uploading ? 'Uploading…' : '＋ Add'}
+            <input
+              type="file" accept="image/*,application/pdf" capture="environment"
+              style={{ display: 'none' }} disabled={uploading}
+              onChange={(e) => void onUpload(e.target.files?.[0]).then(() => { e.target.value = '' })}
+            />
+          </label>
+        </div>
+        {documents.map((d) => (
+          <button key={d.id} className="txn txn--tap" onClick={() => setDocDetail(d)}>
+            <div className="txn__main">
+              <div className="txn__desc">{d.title}</div>
+              <div className="txn__sub">{d.date ? `${formatDayMonth(d.date)} · ` : ''}{d.doc_type}</div>
+            </div>
+          </button>
+        ))}
+        {documents.length === 0 && <EmptyState icon="📎" title="No receipts filed" hint="Photograph or upload a receipt/statement." />}
+      </div>
+
+      {docDetail && (
+        <DocumentSheet
+          doc={docDetail}
+          onClose={() => setDocDetail(null)}
+          onDeleted={() => { setDocDetail(null); load() }}
+        />
+      )}
 
       {(addingIncome || editIncome) && (
         <IncomeSheet
@@ -266,6 +313,36 @@ function DeductionSheet({ fy, ownerId, existing, onClose, onSaved }: {
         <input className="input" placeholder="Note (optional)" value={note} onChange={(e) => setNote(e.target.value)} />
         <button className="btn btn--primary" disabled={busy} onClick={() => void save()}>Save</button>
         {existing && <button className="btn" style={{ color: 'var(--danger)' }} disabled={busy} onClick={() => void remove()}>Delete</button>}
+      </div>
+    </div>
+  )
+}
+
+function DocumentSheet({ doc, onClose, onDeleted }: { doc: TaxDocument; onClose: () => void; onDeleted: () => void }) {
+  const [busy, setBusy] = useState(false)
+
+  const view = async () => {
+    const url = await getSignedUrl(doc.storage_path)
+    window.open(url, '_blank', 'noopener')
+  }
+
+  const remove = async () => {
+    setBusy(true)
+    try {
+      await deleteDocument(doc.id, doc.storage_path)
+      onDeleted()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="sheet-backdrop" onClick={onClose}>
+      <div className="sheet" onClick={(e) => e.stopPropagation()}>
+        <h2>{doc.title}</h2>
+        <p className="txn__sub">{doc.date ? formatDayMonth(doc.date) : ''} · {doc.doc_type}</p>
+        <button className="btn" onClick={() => void view()}>View</button>
+        <button className="btn" style={{ color: 'var(--danger)' }} disabled={busy} onClick={() => void remove()}>Delete</button>
       </div>
     </div>
   )
