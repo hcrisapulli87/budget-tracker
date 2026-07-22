@@ -14,6 +14,7 @@ import { EmptyState } from '../components/ui/EmptyState'
 import { listDocuments, uploadDocument, deleteDocument, getSignedUrl } from '../data/taxDocuments'
 import { fetchChecklist, setChecklistItem } from '../data/taxChecklistState'
 import { TAX_CHECKLIST } from '../domain/taxChecklist'
+import { DEDUCTION_CATEGORIES, deductionLabel } from '../domain/deductionCategories'
 import type { DeductionCategory, IncomeSourceType, TaxChecklistState, TaxDeduction, TaxDocument, TaxIncome, Txn } from '../data/types'
 
 const SOURCE_TYPES: { value: IncomeSourceType; label: string }[] = [
@@ -22,16 +23,7 @@ const SOURCE_TYPES: { value: IncomeSourceType; label: string }[] = [
   { value: 'business', label: 'Business' },
   { value: 'other', label: 'Other' },
 ]
-const DEDUCTION_CATEGORIES: { value: DeductionCategory; label: string }[] = [
-  { value: 'wfh', label: 'Work from home' },
-  { value: 'vehicle', label: 'Vehicle' },
-  { value: 'self_education', label: 'Self-education' },
-  { value: 'donations', label: 'Donations' },
-  { value: 'tools', label: 'Tools/equipment' },
-  { value: 'other', label: 'Other' },
-]
 const sourceLabel = (v: string) => SOURCE_TYPES.find((s) => s.value === v)?.label ?? v
-const deductionLabel = (v: string) => DEDUCTION_CATEGORIES.find((d) => d.value === v)?.label ?? v
 
 export default function TaxScreen() {
   const { user } = useAuth()

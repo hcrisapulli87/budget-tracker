@@ -14,8 +14,9 @@ import { CategoryPicker } from '../components/CategoryPicker'
 import { IconCircle } from '../components/ui/IconCircle'
 import { SegmentedControl } from '../components/ui/SegmentedControl'
 import { EmptyState } from '../components/ui/EmptyState'
+import { DEDUCTION_CATEGORIES } from '../domain/deductionCategories'
 import type { AddPrefill } from './AddScreen'
-import type { Txn } from '../data/types'
+import type { DeductionCategory, Txn } from '../data/types'
 
 function monthLabel(iso: string): string {
   return new Date(`${iso}-01T00:00:00`).toLocaleDateString('en-AU', { month: 'long', year: 'numeric' })
@@ -224,6 +225,22 @@ function TxnSheet({ txn, mine, onClose, onChanged }: { txn: Txn; mine: boolean; 
     onChanged()
   }
 
+  const toggleDeductible = async () => {
+    setBusy(true)
+    try {
+      const next = !txn.deductible
+      await updateTransaction(txn.id, { deductible: next, deduction_category: next ? (txn.deduction_category ?? 'other') : null })
+      onChanged()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const changeDeductionCategory = async (category: DeductionCategory) => {
+    await updateTransaction(txn.id, { deduction_category: category })
+    onChanged()
+  }
+
   const remove = async () => {
     setBusy(true)
     try {
@@ -265,6 +282,18 @@ function TxnSheet({ txn, mine, onClose, onChanged }: { txn: Txn; mine: boolean; 
             <button className="chip" onClick={() => setPicking(true)}>
               {cat ? `${cat.icon} ${cat.name}` : '＋ categorise'}{!txn.category_confirmed && cat ? ' (best guess — tap to fix)' : ''}
             </button>
+            <button className={`chip${txn.deductible ? ' chip--confirmed' : ''}`} disabled={busy} onClick={() => void toggleDeductible()}>
+              {txn.deductible ? '✓ Tax-deductible' : '＋ Mark tax-deductible'}
+            </button>
+            {txn.deductible && (
+              <select
+                className="input"
+                value={txn.deduction_category ?? 'other'}
+                onChange={(e) => void changeDeductionCategory(e.target.value as DeductionCategory)}
+              >
+                {DEDUCTION_CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+              </select>
+            )}
             {txn.merchant_norm && (
               <button className="btn" onClick={showMerchant}>History at this merchant</button>
             )}
