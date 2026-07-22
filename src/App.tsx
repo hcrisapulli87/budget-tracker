@@ -11,6 +11,7 @@ import Insights from './screens/Insights'
 import Recurring from './screens/Recurring'
 import AccountsScreen from './screens/AccountsScreen'
 import Settings from './screens/Settings'
+import TaxScreen from './screens/TaxScreen'
 
 export default function App() {
   const { loading, session } = useAuth()
@@ -34,6 +35,7 @@ export default function App() {
           <Route path="/accounts" element={<AccountsScreen />} />
           <Route path="/import" element={<ImportScreen />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/tax" element={<TaxScreen />} />
         </Route>
       </Routes>
     </DataProvider>
