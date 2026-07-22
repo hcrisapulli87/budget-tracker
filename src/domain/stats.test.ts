@@ -11,7 +11,8 @@ function txn(over: Partial<Txn>): Txn {
   return {
     id: `t${seq}`, owner_id: 'u1', account: 'a', txn_date: '2026-07-10', amount: -10,
     description: 'X', merchant_norm: 'x', category_id: 'c1', category_confirmed: false,
-    import_hash: `h${seq}`, source: 'csv', import_id: null, note: '', ...over,
+    import_hash: `h${seq}`, source: 'csv', import_id: null, note: '',
+    deductible: false, deduction_category: null, ...over,
   }
 }
 const NONE = new Set<string>()

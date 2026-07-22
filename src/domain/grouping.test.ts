@@ -7,6 +7,7 @@ function txn(id: string, date: string, amount: number): Txn {
     id, owner_id: 'u1', account: 'a', txn_date: date, amount, description: id,
     merchant_norm: id, category_id: null, category_confirmed: false,
     import_hash: id, source: 'manual', import_id: null, note: '',
+    deductible: false, deduction_category: null,
   }
 }
 

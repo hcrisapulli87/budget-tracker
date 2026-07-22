@@ -63,6 +63,8 @@ export interface TxnPatch {
   category_confirmed?: boolean
   account?: string
   note?: string
+  deductible?: boolean
+  deduction_category?: string | null
 }
 
 export async function updateTransaction(id: string, patch: TxnPatch): Promise<void> {

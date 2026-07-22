@@ -8,7 +8,8 @@ function txn(over: Partial<Txn>): Txn {
   return {
     id: `t${seq}`, owner_id: 'u1', account: 'cash', txn_date: '2026-07-10', amount: -5,
     description: 'Coffee', merchant_norm: 'coffee', category_id: 'c2', category_confirmed: true,
-    import_hash: `m${seq}`, source: 'manual', import_id: null, note: '', ...over,
+    import_hash: `m${seq}`, source: 'manual', import_id: null, note: '',
+    deductible: false, deduction_category: null, ...over,
   }
 }
 

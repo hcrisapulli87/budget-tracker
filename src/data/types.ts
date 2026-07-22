@@ -39,6 +39,8 @@ export interface Txn {
   source: TxnSource
   import_id: string | null
   note: string
+  deductible: boolean
+  deduction_category: string | null
 }
 
 export type Cadence = 'weekly' | 'fortnightly' | 'monthly' | 'quarterly' | 'annual'
@@ -99,4 +101,54 @@ export interface ImportRecord {
   row_count: number
   new_count: number
   duplicate_count: number
+}
+
+export type IncomeSourceType = 'salary' | 'investment' | 'business' | 'other'
+
+export interface TaxIncome {
+  id: string
+  owner_id: string
+  fy: number
+  source_type: IncomeSourceType
+  payer: string
+  amount: number
+  date: string
+  note: string
+}
+
+export type DeductionCategory = 'wfh' | 'vehicle' | 'self_education' | 'donations' | 'tools' | 'other'
+
+export interface TaxDeduction {
+  id: string
+  owner_id: string
+  fy: number
+  category: DeductionCategory
+  description: string
+  amount: number
+  date: string
+  note: string
+}
+
+export type TaxDocType = 'receipt' | 'statement' | 'other'
+export type TaxLinkType = 'income' | 'deduction' | 'none'
+
+export interface TaxDocument {
+  id: string
+  owner_id: string
+  fy: number
+  title: string
+  doc_type: TaxDocType
+  storage_path: string
+  link_type: TaxLinkType
+  link_id: string | null
+  amount: number | null
+  date: string | null
+}
+
+export interface TaxChecklistState {
+  id: string
+  owner_id: string
+  fy: number
+  item_key: string
+  done: boolean
 }
