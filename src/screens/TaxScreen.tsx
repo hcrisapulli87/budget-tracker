@@ -12,7 +12,9 @@ import { StatCard } from '../components/ui/StatCard'
 import { SegmentedControl } from '../components/ui/SegmentedControl'
 import { EmptyState } from '../components/ui/EmptyState'
 import { listDocuments, uploadDocument, deleteDocument, getSignedUrl } from '../data/taxDocuments'
-import type { DeductionCategory, IncomeSourceType, TaxDeduction, TaxDocument, TaxIncome, Txn } from '../data/types'
+import { fetchChecklist, setChecklistItem } from '../data/taxChecklistState'
+import { TAX_CHECKLIST } from '../domain/taxChecklist'
+import type { DeductionCategory, IncomeSourceType, TaxChecklistState, TaxDeduction, TaxDocument, TaxIncome, Txn } from '../data/types'
 
 const SOURCE_TYPES: { value: IncomeSourceType; label: string }[] = [
   { value: 'salary', label: 'Salary' },
@@ -40,15 +42,22 @@ export default function TaxScreen() {
   const [documents, setDocuments] = useState<TaxDocument[]>([])
   const [uploading, setUploading] = useState(false)
   const [docDetail, setDocDetail] = useState<TaxDocument | null>(null)
+  const [checklist, setChecklist] = useState<TaxChecklistState[]>([])
 
   const load = useCallback(() => {
     fetchIncome(fy).then(setIncome).catch(() => setIncome([]))
     fetchManualDeductions(fy).then(setManualDeductions).catch(() => setManualDeductions([]))
     fetchTaggedDeductions(fy).then(setTaggedDeductions).catch(() => setTaggedDeductions([]))
     listDocuments(fy).then(setDocuments).catch(() => setDocuments([]))
+    fetchChecklist(fy).then(setChecklist).catch(() => setChecklist([]))
   }, [fy])
   useEffect(load, [load])
-  useRealtime(['tax_income', 'tax_deductions', 'tax_documents', 'budget_transactions'], load)
+  useRealtime(['tax_income', 'tax_deductions', 'tax_documents', 'tax_checklist_state', 'budget_transactions'], load)
+
+  const toggleChecklist = (key: string, done: boolean) => {
+    if (!user) return
+    void setChecklistItem(user.id, fy, key, done).then(load)
+  }
 
   const onUpload = async (file: File | undefined) => {
     if (!file || !user) return
@@ -170,6 +179,21 @@ export default function TaxScreen() {
           </button>
         ))}
         {documents.length === 0 && <EmptyState icon="📎" title="No receipts filed" hint="Photograph or upload a receipt/statement." />}
+      </div>
+
+      <div className="card">
+        <h2>EOFY checklist</h2>
+        {TAX_CHECKLIST.map((item) => {
+          const done = checklist.find((c) => c.item_key === item.key)?.done ?? false
+          return (
+            <label key={item.key} className="row" style={{ marginBottom: 8, cursor: 'pointer' }}>
+              <input type="checkbox" checked={done} onChange={(e) => toggleChecklist(item.key, e.target.checked)} />
+              <span style={{ textDecoration: done ? 'line-through' : 'none', color: done ? 'var(--muted)' : 'inherit' }}>
+                {item.label}
+              </span>
+            </label>
+          )
+        })}
       </div>
 
       {docDetail && (
