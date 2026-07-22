@@ -90,6 +90,7 @@ export default function Settings() {
       <div className="card">
         <h2>Data</h2>
         <Link to="/import" className="btn" style={{ display: 'block', textAlign: 'center', textDecoration: 'none', marginBottom: 8 }}>Import bank CSV</Link>
+        <Link to="/tax" className="btn" style={{ display: 'block', textAlign: 'center', textDecoration: 'none' }}>Tax records</Link>
       </div>
 
       <div className="card">

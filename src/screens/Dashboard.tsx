@@ -189,6 +189,11 @@ export default function Dashboard() {
         {recent.length === 0 && <p className="muted">Tap ＋ to add your first spend.</p>}
       </div>
 
+      <Link to="/tax" className="card row--between" style={{ textDecoration: 'none', color: 'inherit' }}>
+        <span>🧾 Tax records</span>
+        <span className="txn__sub">EOFY records & checklist →</span>
+      </Link>
+
       {observations.length > 0 && (
         <div className="card">
           <h2>Worth a look <span className="badge">observations, not verdicts</span></h2>
