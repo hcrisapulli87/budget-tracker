@@ -109,6 +109,106 @@ create table if not exists public.budget_budgets (
   monthly_limit numeric(12,2) not null
 );
 
+-- ── v5 additive changes — Tax module ──────────────────────────────────────────
+-- Personal tax record-keeping: income, deductions, receipt docs, EOFY checklist.
+-- Private to each person (owner-only RLS, unlike the shared budget_ tables above)
+-- since Tally is a two-person app but tax records are per-individual.
+-- fy = ending calendar year of the AU financial year (Jul 1–Jun 30), e.g. 2026 = FY2025-26.
+
+alter table public.budget_transactions add column if not exists deductible boolean not null default false;
+alter table public.budget_transactions add column if not exists deduction_category text;
+
+create table if not exists public.tax_income (
+  id          uuid primary key default gen_random_uuid(),
+  owner_id    uuid not null references public.profiles (id) on delete cascade,
+  fy          integer not null,
+  source_type text not null default 'other' check (source_type in ('salary', 'investment', 'business', 'other')),
+  payer       text not null default '',
+  amount      numeric(12,2) not null,
+  date        date not null,
+  note        text not null default ''
+);
+
+create table if not exists public.tax_deductions (
+  id          uuid primary key default gen_random_uuid(),
+  owner_id    uuid not null references public.profiles (id) on delete cascade,
+  fy          integer not null,
+  category    text not null default 'other' check (category in ('wfh', 'vehicle', 'self_education', 'donations', 'tools', 'other')),
+  description text not null,
+  amount      numeric(12,2) not null,
+  date        date not null,
+  note        text not null default ''
+);
+
+create table if not exists public.tax_documents (
+  id           uuid primary key default gen_random_uuid(),
+  owner_id     uuid not null references public.profiles (id) on delete cascade,
+  fy           integer not null,
+  title        text not null,
+  doc_type     text not null default 'receipt' check (doc_type in ('receipt', 'statement', 'other')),
+  storage_path text not null,
+  link_type    text not null default 'none' check (link_type in ('income', 'deduction', 'none')),
+  link_id      uuid,
+  amount       numeric(12,2),
+  date         date
+);
+
+create table if not exists public.tax_checklist_state (
+  id       uuid primary key default gen_random_uuid(),
+  owner_id uuid not null references public.profiles (id) on delete cascade,
+  fy       integer not null,
+  item_key text not null,
+  done     boolean not null default false,
+  unique (owner_id, fy, item_key)
+);
+
+create index if not exists tax_income_fy_idx     on public.tax_income (owner_id, fy);
+create index if not exists tax_deductions_fy_idx on public.tax_deductions (owner_id, fy);
+create index if not exists tax_documents_fy_idx  on public.tax_documents (owner_id, fy);
+
+-- owner-only RLS (private — read AND write gated on owner_id, unlike budget_ tables)
+alter table public.tax_income          enable row level security;
+alter table public.tax_deductions      enable row level security;
+alter table public.tax_documents       enable row level security;
+alter table public.tax_checklist_state enable row level security;
+
+do $$
+declare t text;
+begin
+  foreach t in array array['tax_income', 'tax_deductions', 'tax_documents', 'tax_checklist_state'] loop
+    execute format('drop policy if exists "%s: owner only" on public.%I', t, t);
+    execute format(
+      'create policy "%s: owner only" on public.%I for all to authenticated using (owner_id = auth.uid()) with check (owner_id = auth.uid())',
+      t, t
+    );
+  end loop;
+end $$;
+
+do $$
+declare t text;
+begin
+  foreach t in array array['tax_income', 'tax_deductions', 'tax_documents', 'tax_checklist_state'] loop
+    if not exists (
+      select 1 from pg_publication_tables
+      where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = t
+    ) then
+      execute format('alter publication supabase_realtime add table public.%I', t);
+    end if;
+  end loop;
+end $$;
+
+-- ── Storage — tax receipt vault ───────────────────────────────────────────────
+-- Bucket "tax-docs" is created by hand in the Supabase dashboard (Storage → New
+-- bucket → private). Objects are stored at "{owner_id}/{fy}/{uuid}-{filename}" —
+-- policies below key off the first path segment so each person only ever sees
+-- their own receipts, matching the owner-only tax_* tables above.
+drop policy if exists "tax-docs: owner only" on storage.objects;
+create policy "tax-docs: owner only"
+  on storage.objects for all
+  to authenticated
+  using (bucket_id = 'tax-docs' and (storage.foldername(name))[1] = auth.uid()::text)
+  with check (bucket_id = 'tax-docs' and (storage.foldername(name))[1] = auth.uid()::text);
+
 -- ── Seeds (idempotent via unique names/patterns) ─────────────────────────────
 
 insert into public.budget_categories (name, colour, icon, sort_order) values
