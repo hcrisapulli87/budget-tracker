@@ -50,6 +50,7 @@
 
 * { box-sizing: border-box; }
 html, body, #root { margin: 0; height: 100%; }
+html { background: var(--page-solid); }
 body {
   color: var(--ink);
   font-family: 'Manrope', 'Segoe UI', system-ui, -apple-system, sans-serif;
