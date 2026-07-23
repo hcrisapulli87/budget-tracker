@@ -12,6 +12,7 @@ import { groupByDay } from '../domain/grouping'
 import { useWho } from '../lib/useWho'
 import { CategoryPicker } from '../components/CategoryPicker'
 import { IconCircle } from '../components/ui/IconCircle'
+import { PersonAvatar } from '../components/ui/PersonAvatar'
 import { SegmentedControl } from '../components/ui/SegmentedControl'
 import { EmptyState } from '../components/ui/EmptyState'
 import { DEDUCTION_CATEGORIES } from '../domain/deductionCategories'
@@ -74,6 +75,12 @@ export default function Transactions() {
 
   const cat = (id: string | null) => categories.find((c) => c.id === id)
   const owner = (id: string) => profiles.find((p) => p.id === id)?.display_name ?? '?'
+
+  // Confirm a best-guess category in place — the suggested chip animates out.
+  const confirmGuess = async (t: Txn) => {
+    await updateTransaction(t.id, { category_confirmed: true })
+    load()
+  }
 
   // Re-apply learned rules to every still-unconfirmed transaction — corrections
   // made since import get to categorise the backlog, not just future imports.
@@ -157,12 +164,21 @@ export default function Transactions() {
                   <div className="txn__main">
                     <div className="txn__desc">{t.description}</div>
                     <div className="txn__sub">
-                      {searching ? `${formatDayMonth(t.txn_date)} · ` : ''}{owner(t.owner_id)} · {t.account}
-                      {!t.category_confirmed && t.category_id && ' · guess'}
+                      {searching ? `${formatDayMonth(t.txn_date)} · ` : ''}{cat(t.category_id)?.name ?? 'Uncategorised'} · {t.account}
                     </div>
                   </div>
-                  <span className={`amount ${t.amount < 0 ? 'amount--neg' : 'amount--pos'}`}>{formatAUD(t.amount)}</span>
+                  <div className="txn__side">
+                    <span className={`amount ${t.amount < 0 ? 'amount--neg' : 'amount--pos'}`}>{formatAUD(t.amount)}</span>
+                    <PersonAvatar name={owner(t.owner_id)} isMe={t.owner_id === user?.id} size={18} />
+                  </div>
                 </button>
+                {!t.category_confirmed && t.category_id && (
+                  <div style={{ padding: '0 2px 10px' }}>
+                    <button className="chip chip--suggest" onClick={() => void confirmGuess(t)}>
+                      {cat(t.category_id)?.icon} {cat(t.category_id)?.name}? — tap to confirm
+                    </button>
+                  </div>
+                )}
               </li>
             ))}
           </ul>
