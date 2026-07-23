@@ -120,7 +120,10 @@ export default function Dashboard() {
           <p className="greeting">{greeting}{me ? `, ${me.display_name}` : ''}</p>
           <p className="txn__sub">{formatDayMonth(today)}</p>
         </div>
-        <Link className="gear" to="/settings" aria-label="Settings">⚙️</Link>
+        <div className="row" style={{ gap: 10 }}>
+          <Link className="header-add" to="/add" aria-label="Add transaction">＋</Link>
+          <Link className="gear" to="/settings" aria-label="Settings">⚙️</Link>
+        </div>
       </div>
       <div className="row" style={{ margin: '8px 0' }}>
         <SegmentedControl options={[{ value: 'mine', label: 'Me' }, { value: 'all', label: 'Both' }]} value={who} onChange={setWho} />

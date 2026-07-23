@@ -120,6 +120,7 @@ export default function Transactions() {
             {rescanning ? 'Scanning…' : 'Re-scan'}
           </button>
           <Link to="/import" className="gear" aria-label="Import CSV">⤓</Link>
+          <Link className="header-add" to="/add" aria-label="Add transaction">＋</Link>
         </div>
       </div>
       {rescanNote && <p className="txn__sub" style={{ whiteSpace: 'normal' }}>{rescanNote}</p>}

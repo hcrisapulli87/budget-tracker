@@ -6,8 +6,15 @@ import {
   fetchManualDeductions, fetchTaggedDeductions,
   insertDeduction, updateDeduction, deleteDeduction,
 } from '../data/taxDeductions'
+import {
+  fetchDeductionCandidates, fetchIncomeCandidates, importedFromTxnNote,
+  type DeductionCandidate, type IncomeCandidate,
+} from '../data/taxSuggestions'
+import { updateTransaction } from '../data/transactions'
 import { fyLabel, currentFy } from '../domain/fy'
 import { formatAUD, formatDayMonth, isoToday } from '../domain/money'
+import { ratesForFy, VEHICLE_KM_CAP } from '../domain/taxRates'
+import { buildTaxSummaryCsv, downloadTaxSummary } from '../domain/taxExport'
 import { StatCard } from '../components/ui/StatCard'
 import { SegmentedControl } from '../components/ui/SegmentedControl'
 import { EmptyState } from '../components/ui/EmptyState'
@@ -35,6 +42,10 @@ export default function TaxScreen() {
   const [uploading, setUploading] = useState(false)
   const [docDetail, setDocDetail] = useState<TaxDocument | null>(null)
   const [checklist, setChecklist] = useState<TaxChecklistState[]>([])
+  const [deductionCandidates, setDeductionCandidates] = useState<DeductionCandidate[]>([])
+  const [incomeCandidates, setIncomeCandidates] = useState<IncomeCandidate[]>([])
+  const [addingWfh, setAddingWfh] = useState(false)
+  const [addingVehicle, setAddingVehicle] = useState(false)
 
   const load = useCallback(() => {
     fetchIncome(fy).then(setIncome).catch(() => setIncome([]))
@@ -42,9 +53,34 @@ export default function TaxScreen() {
     fetchTaggedDeductions(fy).then(setTaggedDeductions).catch(() => setTaggedDeductions([]))
     listDocuments(fy).then(setDocuments).catch(() => setDocuments([]))
     fetchChecklist(fy).then(setChecklist).catch(() => setChecklist([]))
+    fetchDeductionCandidates(fy).then(setDeductionCandidates).catch(() => setDeductionCandidates([]))
+    fetchIncomeCandidates(fy).then(setIncomeCandidates).catch(() => setIncomeCandidates([]))
   }, [fy])
   useEffect(load, [load])
   useRealtime(['tax_income', 'tax_deductions', 'tax_documents', 'tax_checklist_state', 'budget_transactions'], load)
+
+  const acceptDeduction = async (c: DeductionCandidate, category: DeductionCategory) => {
+    await updateTransaction(c.txn.id, { deductible: true, deduction_category: category })
+    load()
+  }
+  const acceptAllDeductions = async () => {
+    for (const c of deductionCandidates) await updateTransaction(c.txn.id, { deductible: true, deduction_category: c.suggestedCategory })
+    load()
+  }
+  const acceptIncome = async (c: IncomeCandidate) => {
+    if (!user) return
+    await insertIncome({
+      owner_id: user.id, fy,
+      source_type: c.suggestedSource, payer: c.txn.description, amount: c.txn.amount,
+      date: c.txn.txn_date, note: importedFromTxnNote(c.txn.id),
+    })
+    load()
+  }
+  const incomeBySource = useMemo(() => {
+    const groups = new Map<IncomeSourceType, IncomeCandidate[]>()
+    for (const c of incomeCandidates) groups.set(c.suggestedSource, [...(groups.get(c.suggestedSource) ?? []), c])
+    return [...groups.entries()]
+  }, [incomeCandidates])
 
   const toggleChecklist = (key: string, done: boolean) => {
     if (!user) return
@@ -70,6 +106,11 @@ export default function TaxScreen() {
     [manualDeductions, taggedDeductions],
   )
   const net = totalIncome - totalDeductions
+
+  const exportSummary = () => {
+    const csv = buildTaxSummaryCsv(fy, income, manualDeductions, taggedDeductions, documents)
+    downloadTaxSummary(fy, csv)
+  }
 
   const [addingIncome, setAddingIncome] = useState(false)
   const [editIncome, setEditIncome] = useState<TaxIncome | null>(null)
@@ -102,6 +143,60 @@ export default function TaxScreen() {
         <StatCard label="Net" value={formatAUD(net)} />
       </div>
 
+      {(deductionCandidates.length > 0 || incomeCandidates.length > 0) && (
+        <div className="card">
+          <h2>Review from your activity</h2>
+          {deductionCandidates.length > 0 && (
+            <>
+              <div className="row--between">
+                <strong style={{ fontSize: '0.85rem' }}>Suggested deductions ({deductionCandidates.length})</strong>
+                <button className="btn btn--small" onClick={() => void acceptAllDeductions()}>Accept all</button>
+              </div>
+              {deductionCandidates.map((c) => (
+                <div key={c.txn.id} className="txn">
+                  <div className="txn__main">
+                    <div className="txn__desc">{c.txn.description}</div>
+                    <div className="txn__sub">
+                      {formatDayMonth(c.txn.txn_date)} · best guess: {deductionLabel(c.suggestedCategory)}
+                    </div>
+                  </div>
+                  <div className="txn__side">
+                    <span className="amount">{formatAUD(Math.abs(c.txn.amount))}</span>
+                    <button className="btn btn--small" onClick={() => void acceptDeduction(c, c.suggestedCategory)}>Accept</button>
+                  </div>
+                </div>
+              ))}
+            </>
+          )}
+          {incomeCandidates.length > 0 && (
+            <>
+              <p className="txn__sub" style={{ whiteSpace: 'normal', marginTop: deductionCandidates.length > 0 ? 12 : 0 }}>
+                <strong>Income cross-check</strong> — from your bank activity (net), a record to check against your ATO pre-fill. Not the figure you lodge.
+              </p>
+              {incomeBySource.map(([source, list]) => (
+                <div key={source} style={{ marginBottom: 8 }}>
+                  <div className="txn__sub" style={{ fontWeight: 600 }}>
+                    {sourceLabel(source)} · {formatAUD(list.reduce((s, c) => s + c.txn.amount, 0))}
+                  </div>
+                  {list.map((c) => (
+                    <div key={c.txn.id} className="txn">
+                      <div className="txn__main">
+                        <div className="txn__desc">{c.txn.description}</div>
+                        <div className="txn__sub">{formatDayMonth(c.txn.txn_date)}</div>
+                      </div>
+                      <div className="txn__side">
+                        <span className="amount amount--pos">{formatAUD(c.txn.amount)}</span>
+                        <button className="btn btn--small" onClick={() => void acceptIncome(c)}>Accept</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+      )}
+
       <div className="card">
         <div className="row--between">
           <h2>Income</h2>
@@ -122,7 +217,11 @@ export default function TaxScreen() {
       <div className="card">
         <div className="row--between">
           <h2>Deductions</h2>
-          <button className="btn btn--small" onClick={() => setAddingDeduction(true)}>＋ Add</button>
+          <div className="row" style={{ gap: 6 }}>
+            <button className="btn btn--small" onClick={() => setAddingWfh(true)}>WFH calc</button>
+            <button className="btn btn--small" onClick={() => setAddingVehicle(true)}>Vehicle calc</button>
+            <button className="btn btn--small" onClick={() => setAddingDeduction(true)}>＋ Add</button>
+          </div>
         </div>
         {manualDeductions.map((d) => (
           <button key={d.id} className="txn txn--tap" onClick={() => setEditDeduction(d)}>
@@ -188,6 +287,8 @@ export default function TaxScreen() {
         })}
       </div>
 
+      <button className="btn" style={{ width: '100%' }} onClick={exportSummary}>Export summary (CSV)</button>
+
       {docDetail && (
         <DocumentSheet
           doc={docDetail}
@@ -213,6 +314,12 @@ export default function TaxScreen() {
           onClose={() => { setAddingDeduction(false); setEditDeduction(null) }}
           onSaved={() => { setAddingDeduction(false); setEditDeduction(null); load() }}
         />
+      )}
+      {addingWfh && (
+        <WfhSheet fy={fy} ownerId={user.id} onClose={() => setAddingWfh(false)} onSaved={() => { setAddingWfh(false); load() }} />
+      )}
+      {addingVehicle && (
+        <VehicleSheet fy={fy} ownerId={user.id} onClose={() => setAddingVehicle(false)} onSaved={() => { setAddingVehicle(false); load() }} />
       )}
     </div>
   )
@@ -359,6 +466,84 @@ function DocumentSheet({ doc, onClose, onDeleted }: { doc: TaxDocument; onClose:
         <p className="txn__sub">{doc.date ? formatDayMonth(doc.date) : ''} · {doc.doc_type}</p>
         <button className="btn" onClick={() => void view()}>View</button>
         <button className="btn" style={{ color: 'var(--danger)' }} disabled={busy} onClick={() => void remove()}>Delete</button>
+      </div>
+    </div>
+  )
+}
+
+function WfhSheet({ fy, ownerId, onClose, onSaved }: { fy: number; ownerId: string; onClose: () => void; onSaved: () => void }) {
+  const [hours, setHours] = useState('')
+  const [date, setDate] = useState(isoToday())
+  const [busy, setBusy] = useState(false)
+  const rate = ratesForFy(fy).wfhCentsPerHour
+  const hoursNum = Number(hours)
+  const amount = Number.isFinite(hoursNum) && hoursNum > 0 ? (hoursNum * rate) / 100 : 0
+
+  const save = async () => {
+    if (!Number.isFinite(hoursNum) || hoursNum <= 0) return
+    setBusy(true)
+    try {
+      await insertDeduction({
+        owner_id: ownerId, fy, category: 'wfh',
+        description: `Work-from-home, ${hoursNum} hrs @ ${rate}c/hr`, amount, date, note: 'ATO fixed-rate method',
+      })
+      onSaved()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="sheet-backdrop" onClick={onClose}>
+      <div className="sheet" onClick={(e) => e.stopPropagation()}>
+        <h2>Work-from-home calculator</h2>
+        <p className="txn__sub" style={{ whiteSpace: 'normal' }}>
+          ATO fixed-rate method: {rate}c per hour worked from home for FY{fy}. Verify the current rate at ato.gov.au before lodging.
+        </p>
+        <input className="input" type="number" inputMode="decimal" placeholder="Hours worked from home this FY" value={hours} onChange={(e) => setHours(e.target.value)} />
+        <input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        <p className="txn__sub">Deduction: <strong>{formatAUD(amount)}</strong></p>
+        <button className="btn btn--primary" disabled={busy || amount <= 0} onClick={() => void save()}>Add deduction</button>
+      </div>
+    </div>
+  )
+}
+
+function VehicleSheet({ fy, ownerId, onClose, onSaved }: { fy: number; ownerId: string; onClose: () => void; onSaved: () => void }) {
+  const [km, setKm] = useState('')
+  const [date, setDate] = useState(isoToday())
+  const [busy, setBusy] = useState(false)
+  const rate = ratesForFy(fy).vehicleCentsPerKm
+  const kmNum = Number(km)
+  const cappedKm = Number.isFinite(kmNum) ? Math.min(Math.max(kmNum, 0), VEHICLE_KM_CAP) : 0
+  const amount = (cappedKm * rate) / 100
+
+  const save = async () => {
+    if (!Number.isFinite(kmNum) || kmNum <= 0) return
+    setBusy(true)
+    try {
+      await insertDeduction({
+        owner_id: ownerId, fy, category: 'vehicle',
+        description: `Vehicle, ${cappedKm} km @ ${rate}c/km`, amount, date, note: 'ATO cents-per-km method',
+      })
+      onSaved()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="sheet-backdrop" onClick={onClose}>
+      <div className="sheet" onClick={(e) => e.stopPropagation()}>
+        <h2>Vehicle calculator</h2>
+        <p className="txn__sub" style={{ whiteSpace: 'normal' }}>
+          ATO cents-per-km method: {rate}c/km, capped at {VEHICLE_KM_CAP} km per FY. Verify the current rate at ato.gov.au before lodging.
+        </p>
+        <input className="input" type="number" inputMode="decimal" placeholder="Business km this FY" value={km} onChange={(e) => setKm(e.target.value)} />
+        {kmNum > VEHICLE_KM_CAP && <p className="txn__sub warn">Capped at {VEHICLE_KM_CAP} km — the rest isn't deductible under this method.</p>}
+        <input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        <p className="txn__sub">Deduction: <strong>{formatAUD(amount)}</strong></p>
+        <button className="btn btn--primary" disabled={busy || amount <= 0} onClick={() => void save()}>Add deduction</button>
       </div>
     </div>
   )
