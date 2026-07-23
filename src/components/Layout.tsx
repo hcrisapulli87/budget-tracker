@@ -1,11 +1,13 @@
 import { NavLink, Outlet } from 'react-router-dom'
 
+// The redesign's primary five. Insights, Budgets, Tax, Imports, Settings are
+// reached from Home quick-links + the profile avatar, not the tab bar.
 const TABS = [
-  { to: '/', label: 'Home', icon: '📊' },
-  { to: '/transactions', label: 'Activity', icon: '🧾' },
-  { to: '/insights', label: 'Insights', icon: '📈' },
-  { to: '/recurring', label: 'Recurring', icon: '🔁' },
-  { to: '/tax', label: 'Tax', icon: '🧮' },
+  { to: '/', label: 'Home', icon: '🏠' },
+  { to: '/transactions', label: 'Spend', icon: '🧾' },
+  { to: '/accounts', label: 'Accounts', icon: '🏦' },
+  { to: '/subs', label: 'Subs', icon: '🔁' },
+  { to: '/bills', label: 'Bills', icon: '📅' },
 ]
 
 export function Layout() {

@@ -109,6 +109,21 @@ create table if not exists public.budget_budgets (
   monthly_limit numeric(12,2) not null
 );
 
+-- ── v6 additive changes — couple settle-up (Liquid Glass redesign) ─────────────
+-- One row per "even it up" event. Shared spend is split 50/50; whoever paid more
+-- is owed the difference back. Recording a settlement stamps settled_at, and the
+-- net recomputes only from transactions dated after it — so the card collapses to
+-- "all square". Shared-write (either person can settle), like the other budget_ tables.
+create table if not exists public.budget_settlements (
+  id         uuid primary key default gen_random_uuid(),
+  from_id    uuid not null references public.profiles (id) on delete cascade,  -- who paid
+  to_id      uuid not null references public.profiles (id) on delete cascade,  -- who was owed
+  amount     numeric(12,2) not null,
+  settled_at timestamptz not null default now(),
+  created_by uuid not null references public.profiles (id) on delete cascade
+);
+create index if not exists budget_settlements_at_idx on public.budget_settlements (settled_at);
+
 -- ── v5 additive changes — Tax module ──────────────────────────────────────────
 -- Personal tax record-keeping: income, deductions, receipt docs, EOFY checklist.
 -- Private to each person (owner-only RLS, unlike the shared budget_ tables above)
@@ -274,12 +289,13 @@ alter table public.budget_transactions  enable row level security;
 alter table public.budget_subscriptions enable row level security;
 alter table public.budget_bills         enable row level security;
 alter table public.budget_budgets       enable row level security;
+alter table public.budget_settlements   enable row level security;
 
 -- shared-write tables ---------------------------------------------------------
 do $$
 declare t text;
 begin
-  foreach t in array array['budget_categories', 'budget_rules', 'budget_subscriptions', 'budget_bills', 'budget_accounts', 'budget_budgets'] loop
+  foreach t in array array['budget_categories', 'budget_rules', 'budget_subscriptions', 'budget_bills', 'budget_accounts', 'budget_budgets', 'budget_settlements'] loop
     execute format('drop policy if exists "%s: read all (authenticated)" on public.%I', t, t);
     execute format('create policy "%s: read all (authenticated)" on public.%I for select to authenticated using (true)', t, t);
     execute format('drop policy if exists "%s: write all (authenticated)" on public.%I', t, t);

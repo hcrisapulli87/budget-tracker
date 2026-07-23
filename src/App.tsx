@@ -8,7 +8,9 @@ import Transactions from './screens/Transactions'
 import ImportScreen from './screens/ImportScreen'
 import AddScreen from './screens/AddScreen'
 import Insights from './screens/Insights'
-import Recurring from './screens/Recurring'
+import Budgets from './screens/Budgets'
+import Subscriptions from './screens/Subscriptions'
+import Bills from './screens/Bills'
 import AccountsScreen from './screens/AccountsScreen'
 import Settings from './screens/Settings'
 import TaxScreen from './screens/TaxScreen'
@@ -31,7 +33,9 @@ export default function App() {
           <Route path="/transactions" element={<Transactions />} />
           <Route path="/add" element={<AddScreen />} />
           <Route path="/insights" element={<Insights />} />
-          <Route path="/recurring" element={<Recurring />} />
+          <Route path="/budgets" element={<Budgets />} />
+          <Route path="/subs" element={<Subscriptions />} />
+          <Route path="/bills" element={<Bills />} />
           <Route path="/accounts" element={<AccountsScreen />} />
           <Route path="/import" element={<ImportScreen />} />
           <Route path="/settings" element={<Settings />} />

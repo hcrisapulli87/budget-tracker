@@ -92,6 +92,15 @@ export interface Budget {
   monthly_limit: number
 }
 
+export interface Settlement {
+  id: string
+  from_id: string
+  to_id: string
+  amount: number
+  settled_at: string
+  created_by: string
+}
+
 export interface ImportRecord {
   id: string
   owner_id: string
