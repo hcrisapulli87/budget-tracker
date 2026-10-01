@@ -142,19 +142,18 @@ export default function Dashboard() {
 
   return (
     <div className="screen">
-      <div className="row--between">
-        <div>
-          <p className="greeting">{greeting}{me ? `, ${me.display_name}` : ''}</p>
-          <p className="txn__sub">{formatDayMonth(today)}</p>
-        </div>
-        <div className="row" style={{ gap: 10 }}>
+      <div className="home-top">
+        <span className="txn__sub">{formatDayMonth(today)}</span>
+        <div className="home-top__actions">
           <PersonSwitcher />
           {!readOnly && <Link className="header-add" to="/add" aria-label="Add transaction">＋</Link>}
-          <Link to="/settings" aria-label="Settings" style={{ textDecoration: 'none' }}>
+          <Link to="/settings" aria-label="Settings" style={{ textDecoration: 'none', display: 'flex' }}>
             {me ? <PersonAvatar name={me.display_name} isMe size={40} /> : <span className="gear">⚙️</span>}
           </Link>
         </div>
       </div>
+      <p className="greeting home-greeting">{greeting}{me ? `, ${me.display_name}` : ''}</p>
+
       <div className="hero hero--tint">
         <div className="hero__label">Spent this month{readOnly && viewing ? ` · ${viewing.display_name}` : ''}</div>
         <div className="stat">{formatAUD(cur.spend)}</div>

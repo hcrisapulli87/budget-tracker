@@ -121,4 +121,11 @@ describe('demo mock backend', () => {
     expect(after.find((t) => t.id === mineTxn.id)?.category_id).toBe(target.id)
     for (const t of theirs) expect(after.find((x) => x.id === t.id)?.category_id).toBeNull()
   })
+
+  it('lists only Tally members when budget_members is set', async () => {
+    expect((await fetchProfiles()).length).toBe(2) // no members table → everyone
+    await supabase.from('budget_members').insert({ profile_id: ME_ID })
+    expect((await fetchProfiles()).map((p) => p.id)).toEqual([ME_ID])
+    await supabase.from('budget_members').delete().eq('profile_id', ME_ID)
+  })
 })

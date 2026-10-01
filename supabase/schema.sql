@@ -275,6 +275,19 @@ where b.owner_id is null
     where x.owner_id = p.owner_id and x.category_id = b.category_id
   );
 
+-- ── v8 — Tally members (2026-10) ──────────────────────────────────────────────
+-- public.profiles is shared by every household app in this project, so it can
+-- hold logins that aren't Tally users (e.g. a second account used by another
+-- app). Tally's switcher lists only the profiles in budget_members. Empty table
+-- = everyone (non-bot), so a fresh project still works. Add people by hand:
+--   insert into public.budget_members (profile_id) values ('<profile uuid>');
+create table if not exists public.budget_members (
+  profile_id uuid primary key references public.profiles (id) on delete cascade
+);
+alter table public.budget_members enable row level security;
+drop policy if exists "budget_members: read all (authenticated)" on public.budget_members;
+create policy "budget_members: read all (authenticated)" on public.budget_members for select to authenticated using (true);
+
 -- ── Seeds (idempotent via unique names/patterns) ─────────────────────────────
 
 insert into public.budget_categories (name, colour, icon, sort_order) values

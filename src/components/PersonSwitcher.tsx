@@ -37,7 +37,7 @@ export function PartnerBanner() {
   if (!readOnly || !viewing || !me) return null
   return (
     <button className="partner-banner" onClick={() => setViewing(me.id)}>
-      Viewing {viewing.display_name}’s money — read-only · <u>back to mine</u>
+      {viewing.display_name}’s money · read-only · <u>back to mine</u>
     </button>
   )
 }
