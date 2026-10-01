@@ -1,5 +1,9 @@
 import { supabase } from '../lib/supabase'
-import type { Txn } from './types'
+import { normaliseMerchant } from '../domain/merchant'
+import { matchRule } from '../domain/ruleEngine'
+import { effectiveRules } from '../domain/ownership'
+import { bulkSetCategory, fetchUnconfirmed } from './transactions'
+import type { Rule, Txn } from './types'
 
 /**
  * User corrected one of their own transactions' category. Persist the
@@ -44,6 +48,34 @@ export async function applyCorrection(txn: Txn, categoryId: string): Promise<voi
     .eq('merchant_norm', txn.merchant_norm)
     .eq('category_confirmed', false)
   if (retroError) throw retroError
+}
+
+/**
+ * Re-run one person's rules over all their still-unconfirmed transactions.
+ * Runs automatically after every correction, so a new rule categorises the
+ * whole backlog (substring matches too), not just that exact merchant.
+ * Returns how many transactions changed.
+ */
+export async function reapplyRules(ownerId: string): Promise<number> {
+  const { data, error } = await supabase.from('budget_rules').select('*')
+  if (error) throw error
+  const rules = effectiveRules((data ?? []) as Rule[], ownerId)
+  const rows = await fetchUnconfirmed(ownerId)
+  const updates = new Map<string, string[]>() // category id → txn ids
+  for (const r of rows) {
+    const match = matchRule(r.merchant_norm || normaliseMerchant(r.description), rules)
+    if (match && match.category_id !== r.category_id) {
+      const ids = updates.get(match.category_id) ?? []
+      ids.push(r.id)
+      updates.set(match.category_id, ids)
+    }
+  }
+  let changed = 0
+  for (const [categoryId, ids] of updates) {
+    await bulkSetCategory(ids, categoryId)
+    changed += ids.length
+  }
+  return changed
 }
 
 export async function deleteRule(id: string): Promise<void> {

@@ -122,6 +122,12 @@ export default function Dashboard() {
 
   const recent = mine.slice(0, 5)
 
+  // categories Tally guessed (or couldn't) this month that you haven't confirmed
+  const toReview = useMemo(
+    () => mine.filter((t) => !t.category_confirmed && t.txn_date >= `${month}-01`).length,
+    [mine, month],
+  )
+
   // next fortnight of bills + subscriptions
   const comingUp = useMemo(
     () => dueBetween(buildRecurring(bills, subs), '0000-01-01', addDaysIso(today, 14)).slice(0, 4),
@@ -161,6 +167,13 @@ export default function Dashboard() {
           ))}
         </svg>
       </div>
+
+      {!readOnly && toReview > 0 && (
+        <Link to="/transactions?review=1" className="card card--tint row--between" style={{ textDecoration: 'none', color: 'inherit' }}>
+          <span>✨ <strong>{toReview}</strong> transaction{toReview === 1 ? '' : 's'} to check this month</span>
+          <span className="txn__sub">review →</span>
+        </Link>
+      )}
 
       <button className="statcard" style={{ width: '100%', textAlign: 'left', cursor: 'pointer' }} onClick={() => navigate('/accounts')}>
         <div className="statcard__label">Net worth · {readOnly ? 'their' : 'your'} accounts</div>

@@ -1,9 +1,14 @@
 # Tally
 
-Two-person budget tracker PWA for the household. Import bank CSVs, get
+Personal budget tracker PWA for a two-person household. Import bank CSVs, get
 auto-categorised transactions (rules that learn from your corrections),
-spending analytics, automatic subscription detection, and bills with Discord
-reminders via the household bot.
+budgets, trends, and one Recurring list — hand-added bills (with Discord
+reminders via the household bot) plus automatically detected subscriptions.
+
+**Sharing model** (same as RecipeVault): everything opens on *your* money. The
+initials switcher in each screen header gives a read-only look at your
+partner's; every write is owner-only. Bills and accounts with no owner are
+"Joint" and show for both of you. Tax records are always private.
 
 **Spec:** `../docs/superpowers/specs/2026-07-13-budget-tracker-design.md`
 **Plan:** `../docs/superpowers/plans/2026-07-13-tally-budget-tracker.md`
@@ -36,6 +41,15 @@ is Row-Level Security).
 3. Then connect this repo to Vercel with `VITE_SUPABASE_URL` and
    `VITE_SUPABASE_PUBLISHABLE_KEY` env vars.
 4. iPhone: open the Vercel URL in Safari → Share → Add to Home Screen.
+
+### Upgrading to v7 (standalone per person)
+
+Run `supabase/schema.sql` again **before** deploying this version. It adds
+`owner_id` to budgets/rules/bills, copies the household budgets to each
+person, keeps existing learned rules as shared defaults, leaves existing bills
+and owner-less accounts as Joint, and switches every table to "read all, write
+your own". Only rows are added — nothing is deleted. The old
+`budget_settlements` table is left in place but no longer used.
 
 ## Discord bill reminders
 

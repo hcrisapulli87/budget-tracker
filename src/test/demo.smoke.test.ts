@@ -19,8 +19,9 @@ import { fetchIncome } from '../data/taxIncome'
 import { fetchManualDeductions } from '../data/taxDeductions'
 import { listDocuments } from '../data/taxDocuments'
 import { fetchChecklist } from '../data/taxChecklistState'
+import { reapplyRules } from '../data/rules'
 import { currentFy } from '../domain/fy'
-import { ME_ID } from '../lib/demo/mockData'
+import { ME_ID, PARTNER_ID } from '../lib/demo/mockData'
 
 describe('demo mock backend', () => {
   it('is always signed in (no login)', async () => {
@@ -98,5 +99,26 @@ describe('demo mock backend', () => {
     expect(mine.every((t) => t.owner_id === ME_ID)).toBe(true)
     const all = await fetchTransactions(from, today)
     expect(all.length).toBeGreaterThan(mine.length)
+  })
+
+  it('re-applies only my rules, only to my unconfirmed transactions', async () => {
+    const all = await fetchTransactions('0000-01-01', '9999-12-31')
+    const mineTxn = all.find((t) => t.owner_id === ME_ID && t.merchant_norm)!
+    // the partner shops at the same merchant, with a guess still unconfirmed
+    const { id: _id, ...copy } = mineTxn
+    await supabase.from('budget_transactions').insert({ ...copy, owner_id: PARTNER_ID, import_hash: 'partner-same-merchant' })
+    const theirs = (await fetchTransactions('0000-01-01', '9999-12-31', PARTNER_ID))
+      .filter((t) => t.merchant_norm === mineTxn.merchant_norm)
+    expect(theirs.length).toBeGreaterThan(0)
+    const cats = await fetchCategories()
+    const target = cats.find((c) => c.name === 'Gifts')!
+    await updateTransaction(mineTxn.id, { category_confirmed: false, category_id: null })
+    for (const t of theirs) await updateTransaction(t.id, { category_confirmed: false, category_id: null })
+    await supabase.from('budget_rules').insert({ owner_id: ME_ID, pattern: mineTxn.merchant_norm, category_id: target.id, hits: 0, created_from: 'correction' })
+
+    expect(await reapplyRules(ME_ID)).toBeGreaterThan(0)
+    const after = await fetchTransactions('0000-01-01', '9999-12-31')
+    expect(after.find((t) => t.id === mineTxn.id)?.category_id).toBe(target.id)
+    for (const t of theirs) expect(after.find((x) => x.id === t.id)?.category_id).toBeNull()
   })
 })

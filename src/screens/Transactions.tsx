@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useData } from '../data/DataProvider'
-import { bulkSetCategory, deleteTransaction, fetchByMerchant, fetchTransactions, fetchUnconfirmed, searchTransactions, updateTransaction } from '../data/transactions'
-import { applyCorrection } from '../data/rules'
+import { deleteTransaction, fetchByMerchant, fetchTransactions, searchTransactions, updateTransaction } from '../data/transactions'
+import { applyCorrection, reapplyRules } from '../data/rules'
 import { useRealtime } from '../data/useRealtime'
 import { formatAUD, formatDayMonth, isoToday } from '../domain/money'
 import { normaliseMerchant } from '../domain/merchant'
-import { matchRule } from '../domain/ruleEngine'
 import { groupByDay } from '../domain/grouping'
 import { CategoryPicker } from '../components/CategoryPicker'
 import { IconCircle } from '../components/ui/IconCircle'
@@ -16,6 +15,8 @@ import { EmptyState } from '../components/ui/EmptyState'
 import { DEDUCTION_CATEGORIES } from '../domain/deductionCategories'
 import type { AddPrefill } from './AddScreen'
 import type { DeductionCategory, Txn } from '../data/types'
+
+const REVIEW = '__review'
 
 function monthLabel(iso: string): string {
   return new Date(`${iso}-01T00:00:00`).toLocaleDateString('en-AU', { month: 'long', year: 'numeric' })
@@ -32,15 +33,16 @@ function monthBounds(iso: string): { from: string; to: string } {
 }
 
 export default function Transactions() {
-  const { categories, rules, viewId, readOnly } = useData()
+  const { categories, viewId, readOnly } = useData()
   const [month, setMonth] = useState(() => isoToday().slice(0, 7))
   const [txns, setTxns] = useState<Txn[]>([])
-  const [catFilter, setCatFilter] = useState('')
+  // '' = all, a category id, or REVIEW for guesses still waiting on a tap
+  const [params] = useSearchParams()
+  const [catFilter, setCatFilter] = useState(params.get('review') ? REVIEW : '')
   const [search, setSearch] = useState('')
   const [results, setResults] = useState<Txn[] | null>(null)
   const [detail, setDetail] = useState<Txn | null>(null)
-  const [rescanning, setRescanning] = useState(false)
-  const [rescanNote, setRescanNote] = useState('')
+  const [note, setNote] = useState('')
 
   const searching = search.trim().length >= 2
 
@@ -64,7 +66,7 @@ export default function Transactions() {
   const visible = useMemo(
     () =>
       source.filter(
-        (t) => !catFilter || t.category_id === catFilter,
+        (t) => !catFilter || (catFilter === REVIEW ? !t.category_confirmed : t.category_id === catFilter),
       ),
     [source, catFilter],
   )
@@ -78,42 +80,6 @@ export default function Transactions() {
     load()
   }
 
-  // Re-apply learned rules to every still-unconfirmed transaction — corrections
-  // made since import get to categorise the backlog, not just future imports.
-  const rescan = async () => {
-    if (rescanning) return
-    setRescanning(true)
-    setRescanNote('')
-    try {
-      const rows = await fetchUnconfirmed(viewId)
-      const updates = new Map<string, string[]>() // category id → txn ids
-      for (const r of rows) {
-        const norm = r.merchant_norm || normaliseMerchant(r.description)
-        const match = matchRule(norm, rules)
-        if (match && match.category_id !== r.category_id) {
-          const ids = updates.get(match.category_id) ?? []
-          ids.push(r.id)
-          updates.set(match.category_id, ids)
-        }
-      }
-      let changed = 0
-      for (const [categoryId, ids] of updates) {
-        await bulkSetCategory(ids, categoryId)
-        changed += ids.length
-      }
-      load()
-      setRescanNote(
-        changed > 0
-          ? `Re-categorised ${changed} transaction${changed > 1 ? 's' : ''} from your corrections.`
-          : 'Nothing new to categorise — fixing a category on any transaction teaches the next re-scan.',
-      )
-    } catch {
-      setRescanNote('Re-scan failed — try again in a moment.')
-    } finally {
-      setRescanning(false)
-    }
-  }
-
   return (
     <div className="screen">
       <div className="row--between">
@@ -122,20 +88,18 @@ export default function Transactions() {
           <PersonSwitcher />
           {!readOnly && (
             <>
-              <button className="btn btn--small" disabled={rescanning} onClick={() => void rescan()}>
-                {rescanning ? 'Scanning…' : 'Re-scan'}
-              </button>
               <Link to="/import" className="gear" aria-label="Import CSV">⤓</Link>
               <Link className="header-add" to="/add" aria-label="Add transaction">＋</Link>
             </>
           )}
         </div>
       </div>
-      {rescanNote && <p className="txn__sub" style={{ whiteSpace: 'normal' }}>{rescanNote}</p>}
+      {note && <p className="txn__sub" style={{ whiteSpace: 'normal' }}>✨ {note}</p>}
       <input className="input" placeholder="Search everything…" value={search} onChange={(e) => setSearch(e.target.value)} />
       <div className="row" style={{ margin: '10px 0' }}>
         <select className="input" value={catFilter} onChange={(e) => setCatFilter(e.target.value)}>
           <option value="">All categories</option>
+          <option value={REVIEW}>✨ Needs review</option>
           {categories.map((c) => (
             <option key={c.id} value={c.id}>{c.icon} {c.name}</option>
           ))}
@@ -182,7 +146,7 @@ export default function Transactions() {
         </div>
       ))}
       {groups.length === 0 && (
-        <EmptyState icon="🧾" title={searching ? 'Nothing found' : 'No transactions yet'} hint={searching ? 'Try a different search.' : readOnly ? undefined : 'Tap ＋ to add a spend, or import a CSV.'} />
+        <EmptyState icon={catFilter === REVIEW ? '✅' : '🧾'} title={searching ? 'Nothing found' : catFilter === REVIEW ? 'All caught up this month' : 'No transactions yet'} hint={searching ? 'Try a different search.' : readOnly || catFilter === REVIEW ? undefined : 'Tap ＋ to add a spend, or import a CSV.'} />
       )}
 
       {detail && (
@@ -190,14 +154,14 @@ export default function Transactions() {
           txn={detail}
           mine={!readOnly}
           onClose={() => setDetail(null)}
-          onChanged={() => { setDetail(null); load(); if (searching) setSearch('') }}
+          onChanged={(msg) => { setDetail(null); load(); setNote(msg ?? ''); if (searching) setSearch('') }}
         />
       )}
     </div>
   )
 }
 
-function TxnSheet({ txn, mine, onClose, onChanged }: { txn: Txn; mine: boolean; onClose: () => void; onChanged: () => void }) {
+function TxnSheet({ txn, mine, onClose, onChanged }: { txn: Txn; mine: boolean; onClose: () => void; onChanged: (note?: string) => void }) {
   const { categories, reload } = useData()
   const navigate = useNavigate()
   const [editing, setEditing] = useState(false)
@@ -234,9 +198,11 @@ function TxnSheet({ txn, mine, onClose, onChanged }: { txn: Txn; mine: boolean; 
 
   const pickCategory = async (categoryId: string) => {
     await applyCorrection(txn, categoryId)
+    // the new rule now categorises the rest of the backlog — no re-scan button
+    const more = await reapplyRules(txn.owner_id).catch(() => 0)
     await reload()
     setPicking(false)
-    onChanged()
+    onChanged(more > 0 ? `Learned from that — ${more} more transaction${more > 1 ? 's' : ''} categorised to match.` : undefined)
   }
 
   const toggleDeductible = async () => {
