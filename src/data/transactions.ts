@@ -16,17 +16,42 @@ export interface TxnInsert {
   note?: string
 }
 
-/** One person's transactions in a date range (everyone's when ownerId is omitted). */
+/**
+ * One person's transactions in a date range (everyone's when ownerId is
+ * omitted), newest first. Pages through PostgREST's 1000-row cap so long
+ * ranges (a year, all of Activity) never come back silently truncated.
+ */
 export async function fetchTransactions(fromIso: string, toIso: string, ownerId?: string): Promise<Txn[]> {
-  let q = supabase
+  const PAGE = 1000
+  const out: Txn[] = []
+  for (let start = 0; ; start += PAGE) {
+    let q = supabase
+      .from('budget_transactions')
+      .select('*')
+      .gte('txn_date', fromIso)
+      .lte('txn_date', toIso)
+    if (ownerId) q = q.eq('owner_id', ownerId)
+    const { data, error } = await q
+      .order('txn_date', { ascending: false })
+      .order('id', { ascending: true }) // stable order across pages
+      .range(start, start + PAGE - 1)
+    if (error) throw error
+    const rows = (data ?? []) as Txn[]
+    out.push(...rows)
+    if (rows.length < PAGE) return out
+  }
+}
+
+/** Date of one person's oldest transaction, or null if they have none. */
+export async function fetchOldestDate(ownerId: string): Promise<string | null> {
+  const { data, error } = await supabase
     .from('budget_transactions')
-    .select('*')
-    .gte('txn_date', fromIso)
-    .lte('txn_date', toIso)
-  if (ownerId) q = q.eq('owner_id', ownerId)
-  const { data, error } = await q.order('txn_date', { ascending: false })
+    .select('txn_date')
+    .eq('owner_id', ownerId)
+    .order('txn_date', { ascending: true })
+    .limit(1)
   if (error) throw error
-  return (data ?? []) as Txn[]
+  return ((data ?? [])[0]?.txn_date as string | undefined) ?? null
 }
 
 /** Which of these import keys already exist? (chunked — PostgREST `in` limits) */

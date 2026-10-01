@@ -128,4 +128,17 @@ describe('demo mock backend', () => {
     expect((await fetchProfiles()).map((p) => p.id)).toEqual([ME_ID])
     await supabase.from('budget_members').delete().eq('profile_id', ME_ID)
   })
+
+  it('pages past the 1000-row cap instead of truncating', async () => {
+    const owner = 'paging-owner'
+    const rows = Array.from({ length: 1050 }, (_, i) => ({
+      owner_id: owner, account: 'x', txn_date: `2020-01-${String((i % 28) + 1).padStart(2, '0')}`,
+      amount: -1, description: 'x', merchant_norm: 'x', category_id: null, category_confirmed: true,
+      import_hash: `paging-${i}`, source: 'csv', import_id: null,
+    }))
+    await supabase.from('budget_transactions').insert(rows)
+    const got = await fetchTransactions('2020-01-01', '2020-12-31', owner)
+    expect(got).toHaveLength(1050)
+    expect(new Set(got.map((t) => t.id)).size).toBe(1050)
+  })
 })

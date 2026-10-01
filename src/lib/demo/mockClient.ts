@@ -54,6 +54,7 @@ class QueryBuilder implements PromiseLike<{ data: unknown; error: null }> {
   private filters: Filter[] = []
   private orders: { col: string; asc: boolean }[] = []
   private limitN: number | null = null
+  private offsetN = 0
   private _single = false
   private maybe = false
   private returning = false
@@ -133,6 +134,11 @@ class QueryBuilder implements PromiseLike<{ data: unknown; error: null }> {
     this.limitN = n
     return this
   }
+  range(from: number, to: number) {
+    this.offsetN = from
+    this.limitN = to - from + 1
+    return this
+  }
   maybeSingle() {
     this.maybe = true
     this._single = true
@@ -154,7 +160,7 @@ class QueryBuilder implements PromiseLike<{ data: unknown; error: null }> {
         return (av < bv ? -1 : 1) * (asc ? 1 : -1)
       })
     }
-    if (this.limitN != null) out = out.slice(0, this.limitN)
+    if (this.limitN != null || this.offsetN) out = out.slice(this.offsetN, this.limitN != null ? this.offsetN + this.limitN : undefined)
     if (this._single || this.maybe) return out[0] ?? null
     return out
   }

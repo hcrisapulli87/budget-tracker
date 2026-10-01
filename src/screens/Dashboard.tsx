@@ -70,7 +70,20 @@ export default function Dashboard() {
   const dayOfMonth = Number(today.slice(8, 10))
   const prevToSameDay = useMemo(() => summarise(mine, `${prevMonth}-01`, addDaysIso(`${prevMonth}-01`, dayOfMonth - 1), excluded), [mine, prevMonth, dayOfMonth, excluded])
   const delta = cur.spend - prevToSameDay.spend
-  const maxDay = Math.max(1, ...cur.byDay.map((d) => d.spend))
+
+  // the hero: last 3 calendar months, this one so far
+  const last3 = useMemo(
+    () => [shift(month, -2), shift(month, -1), month].map((m) => {
+      const { from, to } = monthBounds(m)
+      return { month: m, ...summarise(mine, from, to, excluded) }
+    }),
+    [mine, month, excluded],
+  )
+  const total3 = last3.reduce((sum, m) => sum + m.spend, 0)
+  const income3 = last3.reduce((sum, m) => sum + m.income, 0)
+  const fullMonthAvg = (last3[0].spend + last3[1].spend) / 2
+  const maxMonth = Math.max(1, ...last3.map((m) => m.spend))
+  const monthName = (m: string) => new Date(`${m}-01T00:00:00`).toLocaleDateString('en-AU', { month: 'short' })
 
   const netWorth = accounts.filter((a) => !a.is_archived).reduce((s, a) => s + (a.balance ?? 0), 0)
   const cat = (id: string | null) => categories.find((c) => c.id === id)
@@ -155,16 +168,23 @@ export default function Dashboard() {
       <p className="greeting home-greeting">{greeting}{me ? `, ${me.display_name}` : ''}</p>
 
       <div className="hero hero--tint">
-        <div className="hero__label">Spent this month{readOnly && viewing ? ` · ${viewing.display_name}` : ''}</div>
-        <div className="stat">{formatAUD(cur.spend)}</div>
-        <div className={`delta ${delta <= 0 ? 'amount--pos' : 'error'}`}>
-          {delta <= 0 ? '▼' : '▲'} {formatAUD(Math.abs(delta))} vs last month to today · {formatAUD(cur.income)} in
+        <div className="hero__label">Spent · last 3 months{readOnly && viewing ? ` · ${viewing.display_name}` : ''}</div>
+        <div className="stat">{formatAUD(total3)}</div>
+        <div className="txn__sub" style={{ whiteSpace: 'normal' }}>
+          ~{formatAUD(fullMonthAvg)}/month · {formatAUD(income3)} in
         </div>
-        <svg viewBox={`0 0 ${cur.byDay.length * 6} 40`} width="100%" height="40" preserveAspectRatio="none" aria-label="Daily spending" style={{ marginTop: 10 }}>
-          {cur.byDay.map((d, i) => (
-            <rect key={d.date} x={i * 6} y={40 - (d.spend / maxDay) * 38} width="4" height={(d.spend / maxDay) * 38} fill="var(--accent)" rx="1" />
+        <div className="months3" aria-label="Spending by month">
+          {last3.map((m) => (
+            <div key={m.month} className={`months3__col${m.month === month ? ' months3__col--now' : ''}`}>
+              <div className="months3__amt">{formatAUD(m.spend)}</div>
+              <div className="months3__bar" style={{ height: `${(m.spend / maxMonth) * 70}%` }} />
+              <div className="months3__label">{monthName(m.month)}{m.month === month ? ' so far' : ''}</div>
+            </div>
           ))}
-        </svg>
+        </div>
+        <div className={`delta ${delta <= 0 ? 'amount--pos' : 'error'}`} style={{ marginTop: 10 }}>
+          {delta <= 0 ? '▼' : '▲'} {formatAUD(Math.abs(delta))} vs {monthName(prevMonth)} at this point
+        </div>
       </div>
 
       {!readOnly && toReview > 0 && (

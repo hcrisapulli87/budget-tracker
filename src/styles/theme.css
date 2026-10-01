@@ -320,3 +320,16 @@ table.preview td:nth-child(2) { white-space: normal; min-width: 150px; overflow-
   .brand { font-size: 1.7rem; }
   .greeting { font-size: 1.45rem; }
 }
+
+/* Activity month sections */
+.month-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin: 22px 2px 0; padding-bottom: 6px; border-bottom: 1px solid var(--border); font-weight: 800; font-size: 1.05rem; letter-spacing: -0.02em; }
+.month-head span:last-child { font-size: 0.8rem; font-weight: 700; color: var(--dim); }
+section:first-of-type > .month-head { margin-top: 8px; }
+
+/* Home: last-3-months bars */
+.months3 { display: flex; gap: 10px; align-items: flex-end; margin-top: 14px; height: 120px; }
+.months3__col { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: stretch; justify-content: flex-end; height: 100%; text-align: center; }
+.months3__amt { font-size: 0.8rem; font-weight: 800; margin-bottom: 4px; white-space: nowrap; }
+.months3__bar { border-radius: 10px 10px 4px 4px; background: rgba(255, 255, 255, 0.22); min-height: 4px; }
+.months3__col--now .months3__bar { background: var(--grad); }
+.months3__label { font-size: 0.72rem; color: var(--dim); margin-top: 6px; white-space: nowrap; }

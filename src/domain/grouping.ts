@@ -18,3 +18,30 @@ export function groupByDay(txns: Txn[]): DayGroup[] {
       txns: rows,
     }))
 }
+
+export interface MonthGroup {
+  /** "2026-09" */
+  month: string
+  spend: number
+  days: DayGroup[]
+}
+
+/** Month sections (newest first), each holding its day buckets — Activity's long list. */
+export function groupByMonth(txns: Txn[]): MonthGroup[] {
+  const months: MonthGroup[] = []
+  for (const day of groupByDay(txns)) {
+    const month = day.dateIso.slice(0, 7)
+    let g = months[months.length - 1]
+    if (!g || g.month !== month) months.push((g = { month, spend: 0, days: [] }))
+    g.days.push(day)
+    g.spend += day.spend
+  }
+  return months
+}
+
+/** First day of the month `monthsBack - 1` months before todayIso's month — the start of an N-month window. */
+export function windowStart(todayIso: string, monthsBack: number): string {
+  const [y, m] = todayIso.split('-').map(Number)
+  const t = y * 12 + (m - 1) - (monthsBack - 1)
+  return `${Math.floor(t / 12)}-${String((t % 12) + 1).padStart(2, '0')}-01`
+}

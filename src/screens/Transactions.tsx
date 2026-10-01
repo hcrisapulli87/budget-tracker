@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useData } from '../data/DataProvider'
-import { deleteTransaction, fetchByMerchant, fetchTransactions, searchTransactions, updateTransaction } from '../data/transactions'
+import { deleteTransaction, fetchByMerchant, fetchOldestDate, fetchTransactions, searchTransactions, updateTransaction } from '../data/transactions'
 import { applyCorrection, reapplyRules } from '../data/rules'
 import { useRealtime } from '../data/useRealtime'
 import { formatAUD, formatDayMonth, isoToday } from '../domain/money'
 import { normaliseMerchant } from '../domain/merchant'
-import { groupByDay } from '../domain/grouping'
+import { groupByMonth, windowStart } from '../domain/grouping'
 import { CategoryPicker } from '../components/CategoryPicker'
 import { IconCircle } from '../components/ui/IconCircle'
 import { PersonSwitcher } from '../components/PersonSwitcher'
@@ -21,21 +21,16 @@ const REVIEW = '__review'
 function monthLabel(iso: string): string {
   return new Date(`${iso}-01T00:00:00`).toLocaleDateString('en-AU', { month: 'long', year: 'numeric' })
 }
-function shiftMonth(iso: string, delta: number): string {
-  const [y, m] = iso.split('-').map(Number)
-  const t = y * 12 + (m - 1) + delta
-  return `${Math.floor(t / 12)}-${String((t % 12) + 1).padStart(2, '0')}`
-}
-function monthBounds(iso: string): { from: string; to: string } {
-  const [y, m] = iso.split('-').map(Number)
-  const last = new Date(Date.UTC(y, m, 0)).getUTCDate()
-  return { from: `${iso}-01`, to: `${iso}-${String(last).padStart(2, '0')}` }
-}
+
+/** Activity opens on the last 3 months; "Show older" adds 3 more each tap. */
+const STEP = 3
 
 export default function Transactions() {
   const { categories, viewId, readOnly } = useData()
-  const [month, setMonth] = useState(() => isoToday().slice(0, 7))
+  const [monthsBack, setMonthsBack] = useState(STEP)
   const [txns, setTxns] = useState<Txn[]>([])
+  const [oldest, setOldest] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
   // '' = all, a category id, or REVIEW for guesses still waiting on a tap
   const [params] = useSearchParams()
   const [catFilter, setCatFilter] = useState(params.get('review') ? REVIEW : '')
@@ -46,11 +41,18 @@ export default function Transactions() {
 
   const searching = search.trim().length >= 2
 
+  const from = windowStart(isoToday(), monthsBack)
   const load = useCallback(() => {
-    const { from, to } = monthBounds(month)
     if (!viewId) return
-    fetchTransactions(from, to, viewId).then(setTxns).catch(() => setTxns([]))
-  }, [month, viewId])
+    setLoading(true)
+    fetchTransactions(from, '9999-12-31', viewId)
+      .then(setTxns)
+      .catch(() => setTxns([]))
+      .finally(() => setLoading(false))
+    fetchOldestDate(viewId).then(setOldest).catch(() => setOldest(null))
+  }, [from, viewId])
+  // switching person starts again from their last 3 months
+  useEffect(() => setMonthsBack(STEP), [viewId])
   useEffect(load, [load])
   useRealtime(['budget_transactions'], load)
 
@@ -70,7 +72,8 @@ export default function Transactions() {
       ),
     [source, catFilter],
   )
-  const groups = useMemo(() => groupByDay(visible), [visible])
+  const months = useMemo(() => groupByMonth(visible), [visible])
+  const hasOlder = !searching && oldest !== null && oldest < from
 
   const cat = (id: string | null) => categories.find((c) => c.id === id)
 
@@ -105,16 +108,17 @@ export default function Transactions() {
           ))}
         </select>
       </div>
-      {!searching && (
-        <div className="row--between card">
-          <button className="btn btn--small btn--pager" onClick={() => setMonth(shiftMonth(month, -1))}>‹</button>
-          <strong>{monthLabel(month)}</strong>
-          <button className="btn btn--small btn--pager" onClick={() => setMonth(shiftMonth(month, 1))}>›</button>
-        </div>
-      )}
       {searching && <p className="txn__sub">All-time results for “{search.trim()}” — {visible.length} found</p>}
 
-      {groups.map((g) => (
+      {months.map((m) => (
+        <section key={m.month}>
+          {!searching && (
+            <div className="month-head">
+              <span>{monthLabel(m.month)}</span>
+              <span>{formatAUD(m.spend)} spent</span>
+            </div>
+          )}
+          {m.days.map((g) => (
         <div key={g.dateIso}>
           <div className="day-head">
             <span>{formatDayMonth(g.dateIso)}</span>
@@ -145,8 +149,18 @@ export default function Transactions() {
           </ul>
         </div>
       ))}
-      {groups.length === 0 && (
-        <EmptyState icon={catFilter === REVIEW ? '✅' : '🧾'} title={searching ? 'Nothing found' : catFilter === REVIEW ? 'All caught up this month' : 'No transactions yet'} hint={searching ? 'Try a different search.' : readOnly || catFilter === REVIEW ? undefined : 'Tap ＋ to add a spend, or import a CSV.'} />
+        </section>
+      ))}
+      {hasOlder && (
+        <button className="btn" style={{ width: '100%', marginTop: 12 }} disabled={loading} onClick={() => setMonthsBack((n) => n + STEP)}>
+          {loading ? 'Loading…' : `Show older — before ${monthLabel(from.slice(0, 7))}`}
+        </button>
+      )}
+      {!searching && !hasOlder && oldest && months.length > 0 && (
+        <p className="txn__sub" style={{ textAlign: 'center' }}>That’s everything — back to {formatDayMonth(oldest)}.</p>
+      )}
+      {months.length === 0 && !loading && (
+        <EmptyState icon={catFilter === REVIEW ? '✅' : '🧾'} title={searching ? 'Nothing found' : catFilter === REVIEW ? 'All caught up' : 'No transactions yet'} hint={searching ? 'Try a different search.' : readOnly || catFilter === REVIEW ? undefined : 'Tap ＋ to add a spend, or import a CSV.'} />
       )}
 
       {detail && (
