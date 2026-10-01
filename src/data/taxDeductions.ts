@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase'
+import { fetchAllRows } from './paging'
 import { fyDateRange } from '../domain/fy'
 import type { TaxDeduction, Txn } from './types'
 
@@ -40,14 +41,16 @@ export async function deleteDeduction(id: string): Promise<void> {
 /** Tally transactions tagged deductible whose txn_date falls within this FY. */
 export async function fetchTaggedDeductions(fy: number, ownerId: string): Promise<Txn[]> {
   const { start, end } = fyDateRange(fy)
-  const { data, error } = await supabase
-    .from('budget_transactions')
-    .select('*')
-    .eq('owner_id', ownerId)
-    .eq('deductible', true)
-    .gte('txn_date', start)
-    .lte('txn_date', end)
-    .order('txn_date', { ascending: false })
-  if (error) throw error
-  return (data ?? []) as Txn[]
+  return fetchAllRows<Txn>((from, to) =>
+    supabase
+      .from('budget_transactions')
+      .select('*')
+      .eq('owner_id', ownerId)
+      .eq('deductible', true)
+      .gte('txn_date', start)
+      .lte('txn_date', end)
+      .order('txn_date', { ascending: false })
+      .order('id', { ascending: true })
+      .range(from, to),
+  )
 }

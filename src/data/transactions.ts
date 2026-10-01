@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase'
+import { fetchAllRows } from './paging'
 import type { Txn, TxnSource } from './types'
 
 export interface TxnInsert {
@@ -22,24 +23,18 @@ export interface TxnInsert {
  * ranges (a year, all of Activity) never come back silently truncated.
  */
 export async function fetchTransactions(fromIso: string, toIso: string, ownerId?: string): Promise<Txn[]> {
-  const PAGE = 1000
-  const out: Txn[] = []
-  for (let start = 0; ; start += PAGE) {
+  return fetchAllRows<Txn>((from, to) => {
     let q = supabase
       .from('budget_transactions')
       .select('*')
       .gte('txn_date', fromIso)
       .lte('txn_date', toIso)
     if (ownerId) q = q.eq('owner_id', ownerId)
-    const { data, error } = await q
+    return q
       .order('txn_date', { ascending: false })
       .order('id', { ascending: true }) // stable order across pages
-      .range(start, start + PAGE - 1)
-    if (error) throw error
-    const rows = (data ?? []) as Txn[]
-    out.push(...rows)
-    if (rows.length < PAGE) return out
-  }
+      .range(from, to)
+  })
 }
 
 /** Date of one person's oldest transaction, or null if they have none. */
@@ -114,13 +109,15 @@ export async function searchTransactions(term: string, ownerId: string): Promise
 
 /** Every one of your transactions whose category is still a guess (or missing) — re-scan fodder. */
 export async function fetchUnconfirmed(ownerId: string): Promise<Pick<Txn, 'id' | 'description' | 'merchant_norm' | 'category_id'>[]> {
-  const { data, error } = await supabase
-    .from('budget_transactions')
-    .select('id, description, merchant_norm, category_id')
-    .eq('owner_id', ownerId)
-    .eq('category_confirmed', false)
-  if (error) throw error
-  return (data ?? []) as Pick<Txn, 'id' | 'description' | 'merchant_norm' | 'category_id'>[]
+  return fetchAllRows<Pick<Txn, 'id' | 'description' | 'merchant_norm' | 'category_id'>>((from, to) =>
+    supabase
+      .from('budget_transactions')
+      .select('id, description, merchant_norm, category_id')
+      .eq('owner_id', ownerId)
+      .eq('category_confirmed', false)
+      .order('id', { ascending: true })
+      .range(from, to),
+  )
 }
 
 /** Set one category across many rows (chunked — PostgREST `in` limits). */

@@ -8,7 +8,7 @@ vi.mock('../lib/supabase', async () => {
 
 import { supabase } from '../lib/supabase'
 import { fetchAccounts } from '../data/accounts'
-import { fetchTransactions, updateTransaction } from '../data/transactions'
+import { fetchTransactions, fetchUnconfirmed, updateTransaction } from '../data/transactions'
 import { fetchBills, addBill } from '../data/bills'
 import { fetchSubscriptions } from '../data/subscriptions'
 import { fetchBudgets } from '../data/budgets'
@@ -140,5 +140,9 @@ describe('demo mock backend', () => {
     const got = await fetchTransactions('2020-01-01', '2020-12-31', owner)
     expect(got).toHaveLength(1050)
     expect(new Set(got.map((t) => t.id)).size).toBe(1050)
+
+    // re-categorising sees the whole unconfirmed backlog too
+    await Promise.all(got.map((t) => updateTransaction(t.id, { category_confirmed: false })))
+    expect(await fetchUnconfirmed(owner)).toHaveLength(1050)
   })
 })

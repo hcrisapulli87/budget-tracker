@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase'
+import { fetchAllRows } from './paging'
 import { detectRecurring } from '../domain/recurrence'
 import { addDaysIso, isoToday } from '../domain/money'
 import type { Subscription, SubStatus } from './types'
@@ -31,14 +32,17 @@ export async function renameSubscription(id: string, name: string): Promise<void
  */
 export async function syncSubscriptions(userId: string): Promise<number> {
   const since = addDaysIso(isoToday(), -456)
-  const { data: txns, error } = await supabase
-    .from('budget_transactions')
-    .select('merchant_norm, txn_date, amount')
-    .eq('owner_id', userId)
-    .gte('txn_date', since)
-  if (error) throw error
+  const txns = await fetchAllRows<{ merchant_norm: string; txn_date: string; amount: number }>((from, to) =>
+    supabase
+      .from('budget_transactions')
+      .select('merchant_norm, txn_date, amount')
+      .eq('owner_id', userId)
+      .gte('txn_date', since)
+      .order('id', { ascending: true })
+      .range(from, to),
+  )
 
-  const candidates = detectRecurring(txns ?? [])
+  const candidates = detectRecurring(txns)
   const { data: existingRows, error: exError } = await supabase
     .from('budget_subscriptions')
     .select('*')
