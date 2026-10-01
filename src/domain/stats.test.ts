@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   rangeBounds, cashFlow, categoryBreakdownWithDelta, merchantLeaderboard,
-  dayOfWeekPattern, averages,
 } from './stats'
 import type { Txn } from '../data/types'
 
@@ -84,33 +83,5 @@ describe('merchantLeaderboard', () => {
     expect(out[0]).toEqual({ merchant: 'woolworths', label: 'WOOLWORTHS 2', total: 110, count: 2 })
     expect(out[1].merchant).toBe('bp')
     expect(out).toHaveLength(2)
-  })
-})
-
-describe('dayOfWeekPattern', () => {
-  it('totals spend Mon..Sun', () => {
-    const rows = [
-      txn({ txn_date: '2026-07-13', amount: -10 }), // Monday
-      txn({ txn_date: '2026-07-18', amount: -7 }),  // Saturday
-      txn({ txn_date: '2026-07-11', amount: -3 }),  // Saturday (prev week)
-    ]
-    const out = dayOfWeekPattern(rows, '2026-07-01', '2026-07-31', NONE)
-    expect(out[0]).toBe(10)
-    expect(out[5]).toBe(10)
-    expect(out[6]).toBe(0)
-  })
-})
-
-describe('averages', () => {
-  it('per-day over the range, per spend txn, biggest single', () => {
-    const rows = [
-      txn({ amount: -30, txn_date: '2026-07-01' }),
-      txn({ amount: -10, txn_date: '2026-07-02' }),
-      txn({ amount: 500, txn_date: '2026-07-02' }),
-    ]
-    const out = averages(rows, '2026-07-01', '2026-07-04', NONE)
-    expect(out.perDay).toBe(10)      // 40 / 4 days
-    expect(out.perTxn).toBe(20)      // 40 / 2 spends
-    expect(out.biggest).toBe(30)
   })
 })

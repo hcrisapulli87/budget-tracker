@@ -1,4 +1,4 @@
-import { Routes, Route } from 'react-router-dom'
+import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from './auth/AuthProvider'
 import { DataProvider } from './data/DataProvider'
 import { Layout } from './components/Layout'
@@ -7,10 +7,9 @@ import Dashboard from './screens/Dashboard'
 import Transactions from './screens/Transactions'
 import ImportScreen from './screens/ImportScreen'
 import AddScreen from './screens/AddScreen'
-import Insights from './screens/Insights'
+import Trends from './screens/Trends'
 import Budgets from './screens/Budgets'
-import Subscriptions from './screens/Subscriptions'
-import Bills from './screens/Bills'
+import Recurring from './screens/Recurring'
 import AccountsScreen from './screens/AccountsScreen'
 import Settings from './screens/Settings'
 import TaxScreen from './screens/TaxScreen'
@@ -32,14 +31,17 @@ export default function App() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/transactions" element={<Transactions />} />
           <Route path="/add" element={<AddScreen />} />
-          <Route path="/insights" element={<Insights />} />
+          <Route path="/trends" element={<Trends />} />
           <Route path="/budgets" element={<Budgets />} />
-          <Route path="/subs" element={<Subscriptions />} />
-          <Route path="/bills" element={<Bills />} />
+          <Route path="/recurring" element={<Recurring />} />
           <Route path="/accounts" element={<AccountsScreen />} />
           <Route path="/import" element={<ImportScreen />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/tax" element={<TaxScreen />} />
+          {/* pre-rework paths (home-screen bookmarks, Discord links) */}
+          <Route path="/bills" element={<Navigate to="/recurring" replace />} />
+          <Route path="/subs" element={<Navigate to="/recurring" replace />} />
+          <Route path="/insights" element={<Navigate to="/trends" replace />} />
         </Route>
       </Routes>
     </DataProvider>

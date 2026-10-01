@@ -4,22 +4,18 @@ import { fetchTransactions } from '../data/transactions'
 import { useRealtime } from '../data/useRealtime'
 import {
   rangeBounds, cashFlow, categoryBreakdownWithDelta, merchantLeaderboard,
-  dayOfWeekPattern, averages,
 } from '../domain/stats'
 import type { Range } from '../domain/stats'
-import { budgetPace } from '../domain/budgetMath'
-import { formatAUD, formatDayMonth, isoToday } from '../domain/money'
+import { formatAUD, isoToday } from '../domain/money'
 import { SegmentedControl } from '../components/ui/SegmentedControl'
 import { PersonSwitcher } from '../components/PersonSwitcher'
-import { ProgressBar } from '../components/ui/ProgressBar'
 import { StatCard } from '../components/ui/StatCard'
 import { EmptyState } from '../components/ui/EmptyState'
 import type { Txn } from '../data/types'
 
-const DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-
-export default function Insights() {
-  const { categories, budgets, viewId } = useData()
+/** Where your money goes over a chosen range — categories, merchants, cash flow. */
+export default function Trends() {
+  const { categories, viewId } = useData()
   const [range, setRange] = useState<Range>('month')
   const [txns, setTxns] = useState<Txn[]>([])
   const [drill, setDrill] = useState<string | null>(null) // category id
@@ -33,7 +29,7 @@ export default function Insights() {
     fetchTransactions(bounds.prevFrom, bounds.to, viewId).then(setTxns).catch(() => setTxns([]))
   }, [bounds, viewId])
   useEffect(load, [load])
-  useRealtime(['budget_transactions', 'budget_budgets'], load)
+  useRealtime(['budget_transactions'], load)
 
   const excluded = useMemo(
     () => new Set(categories.filter((c) => c.exclude_from_analytics).map((c) => c.id)),
@@ -44,18 +40,9 @@ export default function Insights() {
   const cf = useMemo(() => cashFlow(mine, bounds.from, bounds.to, excluded), [mine, bounds, excluded])
   const cats = useMemo(() => categoryBreakdownWithDelta(mine, bounds, excluded), [mine, bounds, excluded])
   const leaders = useMemo(() => merchantLeaderboard(mine, bounds.from, bounds.to, excluded), [mine, bounds, excluded])
-  const dow = useMemo(() => dayOfWeekPattern(mine, bounds.from, bounds.to, excluded), [mine, bounds, excluded])
-  const avg = useMemo(() => averages(mine, bounds.from, bounds.to, excluded), [mine, bounds, excluded])
 
   const cat = (id: string | null) => categories.find((c) => c.id === id)
   const totalSpend = cats.reduce((s, c) => s + c.total, 0)
-  const maxDow = Math.max(1, ...dow)
-
-  // budgets always measure the current month, independent of the range picker
-  const monthB = rangeBounds('month', today)
-  const monthTxns = txns.filter((t) => t.txn_date >= monthB.from && t.txn_date <= monthB.to)
-  const dayOfMonth = Number(today.slice(8, 10))
-  const daysInMonth = Number(monthB.to.slice(8, 10))
 
   // donut geometry
   const donut = useMemo(() => {
@@ -70,7 +57,7 @@ export default function Insights() {
   return (
     <div className="screen">
       <div className="row--between">
-        <h1 className="brand">Insights</h1>
+        <h1 className="brand">Trends</h1>
         <PersonSwitcher />
       </div>
       <SegmentedControl
@@ -134,31 +121,6 @@ export default function Insights() {
         )}
       </div>
 
-      {budgets.length > 0 && (
-        <div className="card">
-          <h2>Budgets · {formatDayMonth(today)} (day {dayOfMonth} of {daysInMonth})</h2>
-          {budgets.map((b) => {
-            const c = cat(b.category_id)
-            const spent = monthTxns
-              .filter((t) => t.category_id === b.category_id && t.amount < 0)
-              .reduce((s, t) => s - t.amount, 0)
-            const pace = budgetPace(spent, b.monthly_limit, dayOfMonth, daysInMonth)
-            return (
-              <div key={b.id} style={{ marginBottom: 10 }}>
-                <div className="row--between" style={{ fontSize: '0.85rem' }}>
-                  <span>{c?.icon} {c?.name}</span>
-                  <span className={pace.status === 'over' ? 'error' : pace.status === 'hot' ? 'warn' : 'muted'}>
-                    {formatAUD(spent)} of {formatAUD(b.monthly_limit)}
-                  </span>
-                </div>
-                <ProgressBar value={spent} max={b.monthly_limit} markerAt={pace.expected}
-                  tone={pace.status === 'over' ? 'over' : pace.status === 'hot' ? 'warn' : 'ok'} />
-              </div>
-            )
-          })}
-        </div>
-      )}
-
       {leaders.length > 0 && (
         <div className="card">
           <h2>Top merchants</h2>
@@ -174,23 +136,6 @@ export default function Insights() {
           ))}
         </div>
       )}
-
-      <div className="card">
-        <h2>Spending rhythm</h2>
-        <div className="row" style={{ alignItems: 'flex-end', height: 70 }}>
-          {dow.map((v, i) => (
-            <div key={DOW[i]} style={{ flex: 1, textAlign: 'center' }}>
-              <div style={{ height: `${(v / maxDow) * 50}px`, background: 'var(--accent)', borderRadius: 4, opacity: v === 0 ? 0.15 : 1 }} />
-              <div className="txn__sub">{DOW[i]}</div>
-            </div>
-          ))}
-        </div>
-        <div className="row" style={{ marginTop: 10 }}>
-          <StatCard label="Avg / day" value={formatAUD(avg.perDay)} />
-          <StatCard label="Avg / spend" value={formatAUD(avg.perTxn)} />
-          <StatCard label="Biggest" value={formatAUD(avg.biggest)} />
-        </div>
-      </div>
 
       {drill && (
         <CategoryDrill categoryId={drill} onClose={() => setDrill(null)} txns={mine} excluded={excluded} />

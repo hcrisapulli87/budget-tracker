@@ -104,25 +104,3 @@ export function merchantLeaderboard(txns: Txn[], from: string, to: string, exclu
     .sort((a, b) => b.total - a.total)
     .slice(0, limit)
 }
-
-/** Spend totals Monday..Sunday (index 0 = Monday). */
-export function dayOfWeekPattern(txns: Txn[], from: string, to: string, excluded: Set<string>): number[] {
-  const out = [0, 0, 0, 0, 0, 0, 0]
-  for (const t of txns) {
-    if (t.amount >= 0 || !inRange(t, from, to) || !counted(t, excluded)) continue
-    const dow = new Date(`${t.txn_date}T00:00:00Z`).getUTCDay()
-    out[(dow + 6) % 7] -= t.amount
-  }
-  return out
-}
-
-export function averages(txns: Txn[], from: string, to: string, excluded: Set<string>): { perDay: number; perTxn: number; biggest: number } {
-  const spends = txns.filter((t) => t.amount < 0 && inRange(t, from, to) && counted(t, excluded))
-  const total = spends.reduce((s, t) => s - t.amount, 0)
-  const days = Math.round((Date.parse(to) - Date.parse(from)) / 86_400_000) + 1
-  return {
-    perDay: days > 0 ? total / days : 0,
-    perTxn: spends.length > 0 ? total / spends.length : 0,
-    biggest: spends.reduce((m, t) => Math.max(m, -t.amount), 0),
-  }
-}

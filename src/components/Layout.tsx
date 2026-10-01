@@ -1,14 +1,14 @@
 import { NavLink, Outlet } from 'react-router-dom'
 import { PartnerBanner } from './PersonSwitcher'
 
-// The redesign's primary five. Insights, Budgets, Tax, Imports, Settings are
-// reached from Home quick-links + the profile avatar, not the tab bar.
+// Five tabs, one job each. Trends, Tax, Import and Settings are reached from
+// Home's quick links and the profile avatar.
 const TABS = [
   { to: '/', label: 'Home', icon: '🏠' },
-  { to: '/transactions', label: 'Spend', icon: '🧾' },
+  { to: '/transactions', label: 'Activity', icon: '🧾' },
+  { to: '/budgets', label: 'Budgets', icon: '🎯' },
+  { to: '/recurring', label: 'Recurring', icon: '🔁' },
   { to: '/accounts', label: 'Accounts', icon: '🏦' },
-  { to: '/subs', label: 'Subs', icon: '🔁' },
-  { to: '/bills', label: 'Bills', icon: '📅' },
 ]
 
 export function Layout() {

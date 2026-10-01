@@ -123,7 +123,7 @@ export default function Budgets() {
 
       <p className="txn__sub" style={{ whiteSpace: 'normal' }}>
         The marker shows where you'd be if spending evenly across the month.
-        <br /><Link to="/insights" className="txn__sub">See spending trends →</Link>
+        <br /><Link to="/trends" className="txn__sub">See spending trends →</Link>
       </p>
     </div>
   )

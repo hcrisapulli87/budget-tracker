@@ -10,12 +10,14 @@ import { buildInsights } from '../domain/insights'
 import { budgetPace } from '../domain/budgetMath'
 import { rangeBounds } from '../domain/stats'
 import { visibleTo } from '../domain/ownership'
+import { buildRecurring, countdown, dueBetween } from '../domain/recurring'
+import { fetchBills } from '../data/bills'
 import { formatAUD, formatDayMonth, isoToday, addDaysIso } from '../domain/money'
 import { IconCircle } from '../components/ui/IconCircle'
 import { ProgressBar } from '../components/ui/ProgressBar'
 import { PersonAvatar } from '../components/ui/PersonAvatar'
 import { PersonSwitcher } from '../components/PersonSwitcher'
-import type { Account, Subscription, Txn } from '../data/types'
+import type { Account, Bill, Subscription, Txn } from '../data/types'
 
 function shift(iso: string, delta: number): string {
   const [y, m] = iso.split('-').map(Number)
@@ -29,10 +31,10 @@ function monthBounds(iso: string): { from: string; to: string } {
 }
 
 const QUICK_LINKS = [
-  { to: '/budgets', icon: '🎯', label: 'Budgets' },
-  { to: '/insights', icon: '📈', label: 'Insights' },
+  { to: '/trends', icon: '📈', label: 'Trends' },
   { to: '/tax', icon: '🧮', label: 'Tax' },
   { to: '/import', icon: '⤓', label: 'Import' },
+  { to: '/settings', icon: '⚙️', label: 'Settings' },
 ]
 
 export default function Dashboard() {
@@ -41,6 +43,7 @@ export default function Dashboard() {
   const [txns, setTxns] = useState<Txn[]>([])
   const [subs, setSubs] = useState<Subscription[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
+  const [bills, setBills] = useState<Bill[]>([])
   const today = isoToday()
   const month = today.slice(0, 7)
   const prevMonth = shift(month, -1)
@@ -50,9 +53,10 @@ export default function Dashboard() {
     fetchTransactions(`${shift(month, -3)}-01`, monthBounds(month).to, viewId).then(setTxns).catch(() => setTxns([]))
     fetchSubscriptions().then((s) => setSubs(s.filter((x) => x.owner_id === viewId))).catch(() => setSubs([]))
     fetchAccounts().then((a) => setAccounts(visibleTo(a, viewId))).catch(() => setAccounts([]))
+    fetchBills().then((b) => setBills(visibleTo(b, viewId))).catch(() => setBills([]))
   }, [month, viewId])
   useEffect(load, [load])
-  useRealtime(['budget_transactions', 'budget_subscriptions', 'budget_accounts', 'budget_budgets'], load)
+  useRealtime(['budget_transactions', 'budget_subscriptions', 'budget_accounts', 'budget_budgets', 'budget_bills'], load)
 
   const excluded = useMemo(
     () => new Set(categories.filter((c) => c.exclude_from_analytics).map((c) => c.id)),
@@ -64,7 +68,7 @@ export default function Dashboard() {
   const weekSum = useMemo(() => summarise(mine, week.from, week.to, excluded), [mine, week.from, week.to, excluded])
 
   const dayOfMonth = Number(today.slice(8, 10))
-  const prevToSameDay = summarise(mine, `${prevMonth}-01`, addDaysIso(`${prevMonth}-01`, dayOfMonth - 1), excluded)
+  const prevToSameDay = useMemo(() => summarise(mine, `${prevMonth}-01`, addDaysIso(`${prevMonth}-01`, dayOfMonth - 1), excluded), [mine, prevMonth, dayOfMonth, excluded])
   const delta = cur.spend - prevToSameDay.spend
   const maxDay = Math.max(1, ...cur.byDay.map((d) => d.spend))
 
@@ -117,6 +121,18 @@ export default function Dashboard() {
   )
 
   const recent = mine.slice(0, 5)
+
+  // next fortnight of bills + subscriptions
+  const comingUp = useMemo(
+    () => dueBetween(buildRecurring(bills, subs), '0000-01-01', addDaysIso(today, 14)).slice(0, 4),
+    [bills, subs, today],
+  )
+
+  // this month's biggest categories vs the same days last month
+  const topCats = useMemo(() => {
+    const prev = new Map(prevToSameDay.byCategory.map((c) => [c.categoryId, c.total]))
+    return cur.byCategory.slice(0, 4).map((c) => ({ ...c, delta: c.total - (prev.get(c.categoryId) ?? 0) }))
+  }, [cur, prevToSameDay])
 
   return (
     <div className="screen">
@@ -183,6 +199,42 @@ export default function Dashboard() {
               </div>
             )
           })}
+        </div>
+      )}
+
+      {comingUp.length > 0 && (
+        <div className="card">
+          <div className="row--between">
+            <h2>Coming up</h2>
+            <Link to="/recurring" className="txn__sub">all →</Link>
+          </div>
+          {comingUp.map((i) => (
+            <div key={`${i.kind}-${i.id}`} className="row--between" style={{ fontSize: '0.85rem', marginBottom: 6 }}>
+              <span>{i.name}{i.joint && <> <span className="badge">Joint</span></>}</span>
+              <span className={i.next && i.next < today ? 'error' : 'muted'}>
+                {formatAUD(i.amount)} · {i.next ? countdown(i.next, today) : ''}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {topCats.length > 0 && (
+        <div className="card">
+          <div className="row--between">
+            <h2>Where it went</h2>
+            <Link to="/trends" className="txn__sub">trends →</Link>
+          </div>
+          {topCats.map((c) => (
+            <div key={c.categoryId ?? 'none'} className="txn">
+              <IconCircle icon={cat(c.categoryId)?.icon ?? '❓'} colour={cat(c.categoryId)?.colour ?? '#8ba59a'} size={28} />
+              <div className="txn__main">
+                <div className="txn__desc" style={{ fontSize: '0.88rem' }}>{cat(c.categoryId)?.name ?? 'Uncategorised'}</div>
+                <div className="txn__sub" style={c.delta > 0 ? { color: 'var(--warn)' } : undefined}>{c.delta >= 0 ? '▲' : '▼'} {formatAUD(Math.abs(c.delta))} vs last month</div>
+              </div>
+              <span className="amount" style={{ fontSize: '0.88rem' }}>{formatAUD(c.total)}</span>
+            </div>
+          ))}
         </div>
       )}
 
