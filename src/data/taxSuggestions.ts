@@ -15,12 +15,13 @@ export interface IncomeCandidate {
   suggestedSource: IncomeSourceType
 }
 
-/** FY spend transactions not yet marked deductible that match a known AU deduction keyword. */
-export async function fetchDeductionCandidates(fy: number): Promise<DeductionCandidate[]> {
+/** Your FY spend transactions not yet marked deductible that match a known AU deduction keyword. */
+export async function fetchDeductionCandidates(fy: number, ownerId: string): Promise<DeductionCandidate[]> {
   const { start, end } = fyDateRange(fy)
   const { data, error } = await supabase
     .from('budget_transactions')
     .select('*')
+    .eq('owner_id', ownerId)
     .eq('deductible', false)
     .lt('amount', 0)
     .gte('txn_date', start)
@@ -37,15 +38,16 @@ export async function fetchDeductionCandidates(fy: number): Promise<DeductionCan
 }
 
 /**
- * FY money-in transactions, classified by likely source, excluding any already
+ * Your FY money-in transactions, classified by likely source, excluding any already
  * pulled into tax_income (matched by a "txn:<id>" marker we stash in the note).
  */
-export async function fetchIncomeCandidates(fy: number): Promise<IncomeCandidate[]> {
+export async function fetchIncomeCandidates(fy: number, ownerId: string): Promise<IncomeCandidate[]> {
   const { start, end } = fyDateRange(fy)
   const [txnsRes, incomeRes] = await Promise.all([
     supabase
       .from('budget_transactions')
       .select('*')
+      .eq('owner_id', ownerId)
       .gt('amount', 0)
       .gte('txn_date', start)
       .lte('txn_date', end)

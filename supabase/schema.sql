@@ -224,6 +224,57 @@ create policy "tax-docs: owner only"
   using (bucket_id = 'tax-docs' and (storage.foldername(name))[1] = auth.uid()::text)
   with check (bucket_id = 'tax-docs' and (storage.foldername(name))[1] = auth.uid()::text);
 
+-- ── v7 — standalone per person (2026-10) ─────────────────────────────────────
+-- Same sharing model as RecipeVault: ONE rule — "read all, write only your own".
+-- The app shows your own data by default, with a Me/partner switcher for a
+-- read-only look at theirs. Only rows are ADDED here; nothing is deleted.
+--
+--   budgets       per person. Existing household budgets are COPIED to everyone
+--                 who has transactions, so nobody opens to an empty Budgets screen.
+--   rules         per person. Existing rules (seeds + past corrections) stay
+--                 owner-less and act as shared defaults; a correction now writes
+--                 YOUR rule, which beats the default for your transactions only.
+--   bills,        owner_id null = "Joint" (rent, power…): shown in both people's
+--   accounts      views and editable by either. New ones belong to whoever adds
+--                 them. Bills are deliberately not copied — the Discord bot reads
+--                 budget_bills and would post every reminder twice.
+alter table public.budget_budgets add column if not exists owner_id uuid references public.profiles (id) on delete cascade;
+alter table public.budget_rules   add column if not exists owner_id uuid references public.profiles (id) on delete cascade;
+alter table public.budget_bills   add column if not exists owner_id uuid references public.profiles (id) on delete cascade;
+alter table public.budget_budgets alter column owner_id set default auth.uid();
+alter table public.budget_rules   alter column owner_id set default auth.uid();
+alter table public.budget_bills   alter column owner_id set default auth.uid();
+
+-- Uniqueness moves from global to per-owner. NULLS NOT DISTINCT keeps the
+-- owner-less seed rules idempotent (re-running the seed insert still conflicts).
+alter table public.budget_budgets  drop constraint if exists budget_budgets_category_id_key;
+alter table public.budget_rules    drop constraint if exists budget_rules_pattern_key;
+alter table public.budget_accounts drop constraint if exists budget_accounts_name_key;
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'budget_budgets_owner_category_key') then
+    alter table public.budget_budgets add constraint budget_budgets_owner_category_key unique nulls not distinct (owner_id, category_id);
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'budget_rules_owner_pattern_key') then
+    alter table public.budget_rules add constraint budget_rules_owner_pattern_key unique nulls not distinct (owner_id, pattern);
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'budget_accounts_owner_name_key') then
+    alter table public.budget_accounts add constraint budget_accounts_owner_name_key unique nulls not distinct (owner_id, name);
+  end if;
+end $$;
+
+-- One-time copy of the household budgets to each real Tally user (anyone with a
+-- transaction). Re-runs are no-ops via the not-exists guard.
+insert into public.budget_budgets (owner_id, category_id, monthly_limit)
+select p.owner_id, b.category_id, b.monthly_limit
+from public.budget_budgets b
+cross join (select distinct owner_id from public.budget_transactions) p
+where b.owner_id is null
+  and not exists (
+    select 1 from public.budget_budgets x
+    where x.owner_id = p.owner_id and x.category_id = b.category_id
+  );
+
 -- ── Seeds (idempotent via unique names/patterns) ─────────────────────────────
 
 insert into public.budget_categories (name, colour, icon, sort_order) values
@@ -273,13 +324,14 @@ from (values
   ('salary', 'Income'), ('payroll', 'Income')
 ) as v(pattern, category)
 join public.budget_categories c on c.name = v.category
-on conflict (pattern) do nothing;
+on conflict (owner_id, pattern) do nothing;
 
 -- ── Row-Level Security ────────────────────────────────────────────────────────
--- Read: any authenticated user (i.e. either of us) sees everything.
--- Writes: per-person rows (transactions, imports) are owner-only, matching
--- Tandem; jointly-owned rows (categories, rules, subscriptions, bills) are
--- writable by any authenticated user.
+-- Read: any authenticated user (i.e. either of us) sees everything — that's
+-- what powers the read-only partner view.
+-- Writes (v7): your own rows only. Exceptions: categories stay household-wide;
+-- owner-less "Joint" bills/accounts and the owner-less default rules are
+-- writable by either person.
 
 alter table public.budget_accounts      enable row level security;
 alter table public.budget_categories    enable row level security;
@@ -295,7 +347,7 @@ alter table public.budget_settlements   enable row level security;
 do $$
 declare t text;
 begin
-  foreach t in array array['budget_categories', 'budget_rules', 'budget_subscriptions', 'budget_bills', 'budget_accounts', 'budget_budgets', 'budget_settlements'] loop
+  foreach t in array array['budget_categories', 'budget_settlements'] loop
     execute format('drop policy if exists "%s: read all (authenticated)" on public.%I', t, t);
     execute format('create policy "%s: read all (authenticated)" on public.%I for select to authenticated using (true)', t, t);
     execute format('drop policy if exists "%s: write all (authenticated)" on public.%I', t, t);
@@ -303,11 +355,29 @@ begin
   end loop;
 end $$;
 
+-- own-or-joint tables (v7): owner_id null = joint / shared default -------------
+do $$
+declare t text;
+begin
+  foreach t in array array['budget_bills', 'budget_accounts', 'budget_rules'] loop
+    execute format('drop policy if exists "%s: write all (authenticated)" on public.%I', t, t);
+    execute format('drop policy if exists "%s: read all (authenticated)" on public.%I', t, t);
+    execute format('create policy "%s: read all (authenticated)" on public.%I for select to authenticated using (true)', t, t);
+    execute format('drop policy if exists "%s: insert own" on public.%I', t, t);
+    execute format('create policy "%s: insert own" on public.%I for insert to authenticated with check (owner_id = auth.uid() or owner_id is null)', t, t);
+    execute format('drop policy if exists "%s: update own or joint" on public.%I', t, t);
+    execute format('create policy "%s: update own or joint" on public.%I for update to authenticated using (owner_id = auth.uid() or owner_id is null) with check (owner_id = auth.uid() or owner_id is null)', t, t);
+    execute format('drop policy if exists "%s: delete own or joint" on public.%I', t, t);
+    execute format('create policy "%s: delete own or joint" on public.%I for delete to authenticated using (owner_id = auth.uid() or owner_id is null)', t, t);
+  end loop;
+end $$;
+
 -- owner-write tables ----------------------------------------------------------
 do $$
 declare t text;
 begin
-  foreach t in array array['budget_imports', 'budget_transactions'] loop
+  foreach t in array array['budget_imports', 'budget_transactions', 'budget_subscriptions', 'budget_budgets'] loop
+    execute format('drop policy if exists "%s: write all (authenticated)" on public.%I', t, t);
     execute format('drop policy if exists "%s: read all (authenticated)" on public.%I', t, t);
     execute format('create policy "%s: read all (authenticated)" on public.%I for select to authenticated using (true)', t, t);
     execute format('drop policy if exists "%s: insert own" on public.%I', t, t);
@@ -319,17 +389,9 @@ begin
   end loop;
 end $$;
 
--- Exception: category corrections must work on the PARTNER's transactions too
--- (either person can tidy the books). Permissive policies OR together, so this
--- effectively makes transaction UPDATES shared — acceptable in a two-person
--- project; the owner-only insert/delete policies still stop one person creating
--- or removing the other's transactions.
+-- v7: the old "categorise any" policy (either person could edit the other's
+-- transactions) is retired — the partner's view is read-only now.
 drop policy if exists "budget_transactions: categorise any" on public.budget_transactions;
-create policy "budget_transactions: categorise any"
-  on public.budget_transactions for update
-  to authenticated
-  using (true)
-  with check (true);
 
 -- ── Realtime ─────────────────────────────────────────────────────────────────
 do $$

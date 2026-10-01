@@ -17,6 +17,8 @@ export type RuleOrigin = 'seed' | 'correction'
 
 export interface Rule {
   id: string
+  /** null = household default (seeds + pre-v7 corrections); yours beats it */
+  owner_id: string | null
   pattern: string
   category_id: string
   hits: number
@@ -75,6 +77,8 @@ export type BillFrequency = 'monthly' | 'quarterly' | 'annual'
 
 export interface Bill {
   id: string
+  /** null = joint bill, shown in both people's views */
+  owner_id: string | null
   name: string
   amount: number
   is_estimate: boolean
@@ -88,17 +92,9 @@ export interface Bill {
 
 export interface Budget {
   id: string
+  owner_id: string
   category_id: string
   monthly_limit: number
-}
-
-export interface Settlement {
-  id: string
-  from_id: string
-  to_id: string
-  amount: number
-  settled_at: string
-  created_by: string
 }
 
 export interface ImportRecord {

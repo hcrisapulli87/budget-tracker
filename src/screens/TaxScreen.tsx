@@ -47,15 +47,19 @@ export default function TaxScreen() {
   const [addingWfh, setAddingWfh] = useState(false)
   const [addingVehicle, setAddingVehicle] = useState(false)
 
+  // Tax is always your own — the tax_ tables are owner-only, so the partner
+  // switcher doesn't apply here, and transaction-derived figures are yours too.
+  const myId = user?.id ?? ''
   const load = useCallback(() => {
+    if (!myId) return
     fetchIncome(fy).then(setIncome).catch(() => setIncome([]))
     fetchManualDeductions(fy).then(setManualDeductions).catch(() => setManualDeductions([]))
-    fetchTaggedDeductions(fy).then(setTaggedDeductions).catch(() => setTaggedDeductions([]))
+    fetchTaggedDeductions(fy, myId).then(setTaggedDeductions).catch(() => setTaggedDeductions([]))
     listDocuments(fy).then(setDocuments).catch(() => setDocuments([]))
     fetchChecklist(fy).then(setChecklist).catch(() => setChecklist([]))
-    fetchDeductionCandidates(fy).then(setDeductionCandidates).catch(() => setDeductionCandidates([]))
-    fetchIncomeCandidates(fy).then(setIncomeCandidates).catch(() => setIncomeCandidates([]))
-  }, [fy])
+    fetchDeductionCandidates(fy, myId).then(setDeductionCandidates).catch(() => setDeductionCandidates([]))
+    fetchIncomeCandidates(fy, myId).then(setIncomeCandidates).catch(() => setIncomeCandidates([]))
+  }, [fy, myId])
   useEffect(load, [load])
   useRealtime(['tax_income', 'tax_deductions', 'tax_documents', 'tax_checklist_state', 'budget_transactions'], load)
 

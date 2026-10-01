@@ -20,6 +20,7 @@ import { fetchManualDeductions } from '../data/taxDeductions'
 import { listDocuments } from '../data/taxDocuments'
 import { fetchChecklist } from '../data/taxChecklistState'
 import { currentFy } from '../domain/fy'
+import { ME_ID } from '../lib/demo/mockData'
 
 describe('demo mock backend', () => {
   it('is always signed in (no login)', async () => {
@@ -38,7 +39,7 @@ describe('demo mock backend', () => {
         fetchBudgets(),
         fetchCategories(),
         fetchProfiles(),
-        fetchImports(),
+        fetchImports(ME_ID),
         fetchIncome(fy),
         fetchManualDeductions(fy),
         listDocuments(fy),
@@ -84,7 +85,18 @@ describe('demo mock backend', () => {
       next_due: today,
       autopay: true,
       category_id: null,
+      owner_id: ME_ID,
     })
     expect((await fetchBills()).length).toBe(before + 1)
+  })
+
+  it('scopes each view to one person', async () => {
+    const today = new Date().toISOString().slice(0, 10)
+    const from = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10)
+    const mine = await fetchTransactions(from, today, ME_ID)
+    expect(mine.length).toBeGreaterThan(0)
+    expect(mine.every((t) => t.owner_id === ME_ID)).toBe(true)
+    const all = await fetchTransactions(from, today)
+    expect(all.length).toBeGreaterThan(mine.length)
   })
 })

@@ -1,4 +1,5 @@
 import { NavLink, Outlet } from 'react-router-dom'
+import { PartnerBanner } from './PersonSwitcher'
 
 // The redesign's primary five. Insights, Budgets, Tax, Imports, Settings are
 // reached from Home quick-links + the profile avatar, not the tab bar.
@@ -13,6 +14,7 @@ const TABS = [
 export function Layout() {
   return (
     <>
+      <PartnerBanner />
       <Outlet />
       <nav className="tabbar">
         {TABS.map((t) => (

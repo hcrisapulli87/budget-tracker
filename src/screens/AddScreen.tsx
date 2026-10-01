@@ -8,6 +8,7 @@ import { deriveTemplates } from '../domain/templates'
 import type { Template } from '../domain/templates'
 import { formatAUD, isoToday, addDaysIso } from '../domain/money'
 import { normaliseMerchant } from '../domain/merchant'
+import { visibleTo } from '../domain/ownership'
 import { Numpad } from '../components/ui/Numpad'
 import { CategoryGrid } from '../components/ui/CategoryGrid'
 import { SegmentedControl } from '../components/ui/SegmentedControl'
@@ -40,14 +41,15 @@ export default function AddScreen() {
   const [saved, setSaved] = useState('')
 
   useEffect(() => {
-    fetchAccounts().then(setAccounts).catch(() => setAccounts([]))
+    if (!user) return
+    fetchAccounts().then((a) => setAccounts(visibleTo(a, user.id))).catch(() => setAccounts([]))
     // 90-day window feeds template derivation
-    fetchTransactions(addDaysIso(isoToday(), -90), isoToday()).then(setRecent).catch(() => setRecent([]))
-  }, [])
+    fetchTransactions(addDaysIso(isoToday(), -90), isoToday(), user.id).then(setRecent).catch(() => setRecent([]))
+  }, [user])
 
   const templates = useMemo(
-    () => deriveTemplates(recent.filter((t) => t.owner_id === user?.id), isoToday()),
-    [recent, user],
+    () => deriveTemplates(recent, isoToday()),
+    [recent],
   )
 
   const applyTemplate = (t: Template) => {

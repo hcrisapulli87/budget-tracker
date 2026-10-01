@@ -56,18 +56,20 @@ export async function updateAccount(id: string, patch: AccountPatch): Promise<vo
  */
 export async function recordBalance(name: string, ownerId: string, balance: number, asOfIso: string): Promise<void> {
   const trimmed = name.trim()
-  const { data, error } = await supabase
+  // Your account of that name, else a joint one — never the partner's.
+  const { data: rows, error } = await supabase
     .from('budget_accounts')
-    .select('id, balance_as_of')
+    .select('id, owner_id, balance_as_of')
     .eq('name', trimmed)
-    .maybeSingle()
   if (error) throw error
+  const candidates = (rows ?? []) as { id: string; owner_id: string | null; balance_as_of: string | null }[]
+  const data = candidates.find((a) => a.owner_id === ownerId) ?? candidates.find((a) => a.owner_id === null)
   if (!data) {
     const { error: insErr } = await supabase
       .from('budget_accounts')
       .insert({ name: trimmed, owner_id: ownerId, balance, balance_as_of: asOfIso })
     if (insErr) throw insErr
   } else if (!data.balance_as_of || asOfIso >= data.balance_as_of) {
-    await updateAccount(data.id as string, { balance, balance_as_of: asOfIso })
+    await updateAccount(data.id, { balance, balance_as_of: asOfIso })
   }
 }

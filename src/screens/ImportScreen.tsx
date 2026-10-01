@@ -9,6 +9,7 @@ import type { KeyedTxn } from '../domain/importKey'
 import { digitsOf, formatBsb, groupByAccountRef, matchAccountByRef, splitRef } from '../domain/accountMatch'
 import { normaliseMerchant } from '../domain/merchant'
 import { matchRule } from '../domain/ruleEngine'
+import { visibleTo } from '../domain/ownership'
 import { formatAUD, formatDayMonth } from '../domain/money'
 import { createImport, fetchImports } from '../data/imports'
 import { existingKeys, insertTransactions } from '../data/transactions'
@@ -50,8 +51,8 @@ export default function ImportScreen() {
   const [accounts, setAccounts] = useState<Account[]>([])
 
   useEffect(() => {
-    fetchImports().then(setHistory).catch(() => setHistory([]))
-    fetchAccounts().then(setAccounts).catch(() => setAccounts([]))
+    if (user) fetchImports(user.id).then(setHistory).catch(() => setHistory([]))
+    if (user) fetchAccounts().then((a) => setAccounts(visibleTo(a, user.id))).catch(() => setAccounts([]))
   }, [result])
 
   const knownAccount = accounts.some((a) => !a.is_archived && a.name === account.trim())

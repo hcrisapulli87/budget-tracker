@@ -38,11 +38,12 @@ export async function deleteDeduction(id: string): Promise<void> {
 }
 
 /** Tally transactions tagged deductible whose txn_date falls within this FY. */
-export async function fetchTaggedDeductions(fy: number): Promise<Txn[]> {
+export async function fetchTaggedDeductions(fy: number, ownerId: string): Promise<Txn[]> {
   const { start, end } = fyDateRange(fy)
   const { data, error } = await supabase
     .from('budget_transactions')
     .select('*')
+    .eq('owner_id', ownerId)
     .eq('deductible', true)
     .gte('txn_date', start)
     .lte('txn_date', end)

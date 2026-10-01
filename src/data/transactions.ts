@@ -16,13 +16,15 @@ export interface TxnInsert {
   note?: string
 }
 
-export async function fetchTransactions(fromIso: string, toIso: string): Promise<Txn[]> {
-  const { data, error } = await supabase
+/** One person's transactions in a date range (everyone's when ownerId is omitted). */
+export async function fetchTransactions(fromIso: string, toIso: string, ownerId?: string): Promise<Txn[]> {
+  let q = supabase
     .from('budget_transactions')
     .select('*')
     .gte('txn_date', fromIso)
     .lte('txn_date', toIso)
-    .order('txn_date', { ascending: false })
+  if (ownerId) q = q.eq('owner_id', ownerId)
+  const { data, error } = await q.order('txn_date', { ascending: false })
   if (error) throw error
   return (data ?? []) as Txn[]
 }
@@ -72,11 +74,12 @@ export async function updateTransaction(id: string, patch: TxnPatch): Promise<vo
   if (error) throw error
 }
 
-/** All-time description search (case-insensitive), newest first, capped. */
-export async function searchTransactions(term: string): Promise<Txn[]> {
+/** All-time description search over one person's transactions, newest first, capped. */
+export async function searchTransactions(term: string, ownerId: string): Promise<Txn[]> {
   const { data, error } = await supabase
     .from('budget_transactions')
     .select('*')
+    .eq('owner_id', ownerId)
     .ilike('description', `%${term}%`)
     .order('txn_date', { ascending: false })
     .limit(200)
@@ -84,11 +87,12 @@ export async function searchTransactions(term: string): Promise<Txn[]> {
   return (data ?? []) as Txn[]
 }
 
-/** Every transaction whose category is still a guess (or missing) — re-scan fodder. */
-export async function fetchUnconfirmed(): Promise<Pick<Txn, 'id' | 'description' | 'merchant_norm' | 'category_id'>[]> {
+/** Every one of your transactions whose category is still a guess (or missing) — re-scan fodder. */
+export async function fetchUnconfirmed(ownerId: string): Promise<Pick<Txn, 'id' | 'description' | 'merchant_norm' | 'category_id'>[]> {
   const { data, error } = await supabase
     .from('budget_transactions')
     .select('id, description, merchant_norm, category_id')
+    .eq('owner_id', ownerId)
     .eq('category_confirmed', false)
   if (error) throw error
   return (data ?? []) as Pick<Txn, 'id' | 'description' | 'merchant_norm' | 'category_id'>[]
@@ -105,10 +109,11 @@ export async function bulkSetCategory(ids: string[], categoryId: string): Promis
   }
 }
 
-export async function fetchByMerchant(merchantNorm: string): Promise<Txn[]> {
+export async function fetchByMerchant(merchantNorm: string, ownerId: string): Promise<Txn[]> {
   const { data, error } = await supabase
     .from('budget_transactions')
     .select('*')
+    .eq('owner_id', ownerId)
     .eq('merchant_norm', merchantNorm)
     .order('txn_date', { ascending: false })
     .limit(200)

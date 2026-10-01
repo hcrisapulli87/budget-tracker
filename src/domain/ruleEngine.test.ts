@@ -6,6 +6,7 @@ const rule = (pattern: string, category_id: string): Rule => ({
   id: pattern,
   pattern,
   category_id,
+  owner_id: null,
   hits: 0,
   created_from: 'seed',
 })

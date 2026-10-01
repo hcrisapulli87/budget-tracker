@@ -290,3 +290,10 @@ table.preview td:nth-child(2) { white-space: normal; min-width: 150px; overflow-
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
+
+/* ---- Me/partner switcher + read-only banner (RecipeVault pattern) ---- */
+.person-switch { display: inline-flex; gap: 4px; padding: 4px; border-radius: 999px; background: var(--glass-2); border: 1px solid var(--border); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur); }
+.person-switch__btn { width: 32px; height: 32px; border-radius: 999px; border: 0; background: none; color: var(--dim); font-weight: 800; font-size: 0.85rem; cursor: pointer; font-family: inherit; transition: background 180ms ease, color 180ms ease; }
+.person-switch__btn--active.avatar--you { background: var(--accent); color: var(--accent-ink); }
+.person-switch__btn--active.avatar--partner { background: var(--accent-2); color: #fff; }
+.partner-banner { display: block; width: calc(100% - 32px); max-width: 608px; margin: 10px auto 0; padding: 8px 14px; border-radius: 999px; border: 1px solid var(--accent-2); background: rgba(127, 140, 255, 0.18); color: var(--ink); font-size: 0.8rem; font-family: inherit; text-align: center; cursor: pointer; }

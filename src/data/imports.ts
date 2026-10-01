@@ -25,10 +25,11 @@ export async function createImport(input: {
   return data as ImportRecord
 }
 
-export async function fetchImports(limit = 10): Promise<ImportRecord[]> {
+export async function fetchImports(ownerId: string, limit = 10): Promise<ImportRecord[]> {
   const { data, error } = await supabase
     .from('budget_imports')
     .select('*')
+    .eq('owner_id', ownerId)
     .order('imported_at', { ascending: false })
     .limit(limit)
   if (error) throw error

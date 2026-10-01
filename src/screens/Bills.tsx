@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { addBill, deleteBill, fetchBills, updateBill } from '../data/bills'
 import { fetchTransactions } from '../data/transactions'
 import { useData } from '../data/DataProvider'
+import { visibleTo } from '../domain/ownership'
+import { PersonSwitcher } from '../components/PersonSwitcher'
 import { useRealtime } from '../data/useRealtime'
 import { advanceDue, suggestMatch } from '../domain/billing'
 import { addDaysIso, formatAUD, formatDayMonth, isoToday } from '../domain/money'
@@ -21,13 +23,15 @@ function countdown(iso: string): string {
 }
 
 export default function Bills() {
+  const { viewId, readOnly } = useData()
   const [bills, setBills] = useState<Bill[]>([])
   const [editing, setEditing] = useState<Bill | 'new' | null>(null)
   const [note, setNote] = useState('')
 
   const load = useCallback(() => {
-    fetchBills().then(setBills).catch(() => setBills([]))
-  }, [])
+    if (!viewId) return
+    fetchBills().then((b) => setBills(visibleTo(b, viewId))).catch(() => setBills([]))
+  }, [viewId])
   useEffect(load, [load])
   useRealtime(['budget_bills'], load)
 
@@ -54,7 +58,8 @@ export default function Bills() {
   }
 
   const markPaid = async (bill: Bill) => {
-    const txns = await fetchTransactions(addDaysIso(bill.next_due, -10), addDaysIso(bill.next_due, 10))
+    // a joint bill could have come out of either person's account
+    const txns = await fetchTransactions(addDaysIso(bill.next_due, -10), addDaysIso(bill.next_due, 10), bill.owner_id ?? undefined)
     const match = suggestMatch(bill, txns)
     await updateBill(bill.id, { last_paid: isoToday(), next_due: advanceDue(bill.next_due, bill.frequency, bill.due_day) })
     setNote(match ? `Matched "${match.description}" ${formatAUD(match.amount)} on ${formatDayMonth(match.txn_date)}.` : '')
@@ -65,7 +70,10 @@ export default function Bills() {
     <div className="screen">
       <div className="row--between">
         <h1 className="brand">Bills</h1>
-        <button className="btn btn--small" onClick={() => setEditing('new')}>+ Add</button>
+        <div className="row" style={{ gap: 8 }}>
+          <PersonSwitcher />
+          {!readOnly && <button className="btn btn--small" onClick={() => setEditing('new')}>+ Add</button>}
+        </div>
       </div>
 
       <div className="hero" style={{ cursor: 'default' }}>
@@ -81,19 +89,23 @@ export default function Bills() {
         {upcoming.map((b) => (
           <div key={b.id} className="txn">
             <div className="txn__main">
-              <div className="txn__desc">{b.name}</div>
+              <div className="txn__desc">{b.name}{b.owner_id === null && <> <span className="badge">Joint</span></>}</div>
               <div className="txn__sub">
                 {formatAUD(b.amount)}{b.is_estimate ? ' (est.)' : ''} · {b.frequency} ·{' '}
                 <span className={overdue(b) ? 'error' : ''}>{countdown(b.next_due)}</span>
               </div>
             </div>
-            <div className="txn__side">
-              <div className="row" style={{ gap: 6 }}>
-                <span className="txn__sub">auto</span>
-                <Toggle on={b.autopay} onChange={() => void toggleAutopay(b)} label={`Autopay ${b.name}`} />
+            {readOnly ? (
+              <span className="txn__sub">{b.autopay ? 'autopay' : ''}</span>
+            ) : (
+              <div className="txn__side">
+                <div className="row" style={{ gap: 6 }}>
+                  <span className="txn__sub">auto</span>
+                  <Toggle on={b.autopay} onChange={() => void toggleAutopay(b)} label={`Autopay ${b.name}`} />
+                </div>
+                {!b.autopay && <button className="btn btn--small btn--primary" onClick={() => void markPaid(b)}>Paid</button>}
               </div>
-              {!b.autopay && <button className="btn btn--small btn--primary" onClick={() => void markPaid(b)}>Paid</button>}
-            </div>
+            )}
           </div>
         ))}
         {bills.length === 0 && <EmptyState icon="📅" title="No bills yet" hint="Add recurring bills to get Discord reminders at 8:05am." />}
@@ -108,20 +120,20 @@ export default function Bills() {
                 <div className="txn__desc">{b.name}</div>
                 <div className="txn__sub">paid {b.last_paid ? formatDayMonth(b.last_paid) : ''}</div>
               </div>
-              <button className="btn btn--small" onClick={() => setEditing(b)}>Edit</button>
+              {!readOnly && <button className="btn btn--small" onClick={() => setEditing(b)}>Edit</button>}
             </div>
           ))}
         </div>
       )}
 
-      {editing && (
-        <BillSheet bill={editing === 'new' ? null : editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load() }} />
+      {editing && !readOnly && (
+        <BillSheet ownerId={viewId} bill={editing === 'new' ? null : editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load() }} />
       )}
     </div>
   )
 }
 
-function BillSheet({ bill, onClose, onSaved }: { bill: Bill | null; onClose: () => void; onSaved: () => void }) {
+function BillSheet({ bill, ownerId, onClose, onSaved }: { bill: Bill | null; ownerId: string; onClose: () => void; onSaved: () => void }) {
   const { categories } = useData()
   const [name, setName] = useState(bill?.name ?? '')
   const [amount, setAmount] = useState(bill ? String(bill.amount) : '')
@@ -130,6 +142,8 @@ function BillSheet({ bill, onClose, onSaved }: { bill: Bill | null; onClose: () 
   const [nextDue, setNextDue] = useState(bill?.next_due ?? isoToday())
   const [autopay, setAutopay] = useState(bill?.autopay ?? false)
   const [categoryId, setCategoryId] = useState(bill?.category_id ?? '')
+  // new bills default to yours; existing joint bills stay joint unless claimed
+  const [joint, setJoint] = useState(bill ? bill.owner_id === null : false)
 
   const save = async () => {
     const value = Number(amount)
@@ -138,6 +152,7 @@ function BillSheet({ bill, onClose, onSaved }: { bill: Bill | null; onClose: () 
       name: name.trim(), amount: value, is_estimate: isEstimate, frequency,
       due_day: Number(nextDue.slice(8, 10)), next_due: nextDue, autopay,
       category_id: categoryId || null,
+      owner_id: joint ? null : ownerId,
     }
     if (bill) await updateBill(bill.id, payload)
     else await addBill(payload)
@@ -159,6 +174,7 @@ function BillSheet({ bill, onClose, onSaved }: { bill: Bill | null; onClose: () 
         <label className="muted">Next due</label>
         <input className="input" type="date" value={nextDue} onChange={(e) => setNextDue(e.target.value)} />
         <label className="row"><input type="checkbox" checked={autopay} onChange={(e) => setAutopay(e.target.checked)} /> Autopay (direct debit)</label>
+        <label className="row"><input type="checkbox" checked={joint} onChange={(e) => setJoint(e.target.checked)} /> Joint bill (shows for both of you)</label>
         <select className="input" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
           <option value="">Category (optional)</option>
           {categories.map((c) => (

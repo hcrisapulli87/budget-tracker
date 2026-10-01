@@ -327,6 +327,7 @@ export const subscriptions: Subscription[] = RECURRING.map((r, i) => {
 // ── bills ────────────────────────────────────────────────────────────────────────
 interface Bill {
   id: string
+  owner_id: string | null // null = joint
   name: string
   amount: number
   is_estimate: boolean
@@ -344,17 +345,18 @@ const nextDue = (dueDay: number) => {
   return iso(d)
 }
 export const bills: Bill[] = [
-  { name: 'Rent', amount: 2400, freq: 'monthly' as const, cat: 'Rent/Mortgage', auto: true, est: false },
-  { name: 'Electricity', amount: 285, freq: 'quarterly' as const, cat: 'Utilities', auto: false, est: true },
-  { name: 'Water', amount: 190, freq: 'quarterly' as const, cat: 'Utilities', auto: false, est: true },
-  { name: 'Car Insurance', amount: 1180, freq: 'annual' as const, cat: 'Insurance', auto: true, est: false },
-  { name: 'Home Internet', amount: 89, freq: 'monthly' as const, cat: 'Utilities', auto: true, est: false },
-  { name: 'Mobile Phone', amount: 55, freq: 'monthly' as const, cat: 'Utilities', auto: true, est: false },
-  { name: 'Health Insurance', amount: 210, freq: 'monthly' as const, cat: 'Insurance', auto: true, est: false },
+  { name: 'Rent', amount: 2400, freq: 'monthly' as const, cat: 'Rent/Mortgage', auto: true, est: false, owner: null },
+  { name: 'Electricity', amount: 285, freq: 'quarterly' as const, cat: 'Utilities', auto: false, est: true, owner: null },
+  { name: 'Water', amount: 190, freq: 'quarterly' as const, cat: 'Utilities', auto: false, est: true, owner: null },
+  { name: 'Car Insurance', amount: 1180, freq: 'annual' as const, cat: 'Insurance', auto: true, est: false, owner: ME_ID },
+  { name: 'Home Internet', amount: 89, freq: 'monthly' as const, cat: 'Utilities', auto: true, est: false, owner: null },
+  { name: 'Mobile Phone', amount: 55, freq: 'monthly' as const, cat: 'Utilities', auto: true, est: false, owner: PARTNER_ID },
+  { name: 'Health Insurance', amount: 210, freq: 'monthly' as const, cat: 'Insurance', auto: true, est: false, owner: ME_ID },
 ].map((b) => {
   const dueDay = randInt(1, 28)
   return {
     id: uid(),
+    owner_id: b.owner,
     name: b.name,
     amount: b.amount,
     is_estimate: b.est,
@@ -370,6 +372,7 @@ export const bills: Bill[] = [
 // ── budgets (per-category monthly limits) ──────────────────────────────────────
 interface Budget {
   id: string
+  owner_id: string
   category_id: string
   monthly_limit: number
 }
@@ -382,11 +385,20 @@ export const budgets: Budget[] = [
   ['Transport', 150],
   ['Subscriptions', 120],
   ['Health', 180],
-].map(([name, limit]) => ({ id: uid(), category_id: catByName(name as string).id, monthly_limit: limit as number }))
+].flatMap(([name, limit]) =>
+  // each person keeps their own budgets
+  [ME_ID, PARTNER_ID].map((owner) => ({
+    id: uid(),
+    owner_id: owner,
+    category_id: catByName(name as string).id,
+    monthly_limit: Math.round((limit as number) * (owner === ME_ID ? 1 : 0.8)),
+  })),
+)
 
 // ── rules (seed learning rules) ────────────────────────────────────────────────
 interface Rule {
   id: string
+  owner_id: string | null
   pattern: string
   category_id: string
   hits: number
@@ -416,6 +428,7 @@ const RULE_DEFS: [string, string][] = [
 ]
 export const rules: Rule[] = RULE_DEFS.map(([pattern, cat]) => ({
   id: uid(),
+  owner_id: null, // household defaults
   pattern,
   category_id: catByName(cat).id,
   hits: randInt(2, 40),

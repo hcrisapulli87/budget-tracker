@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { useAuth } from '../auth/AuthProvider'
 import { useData } from '../data/DataProvider'
 import { bulkSetCategory, deleteTransaction, fetchByMerchant, fetchTransactions, fetchUnconfirmed, searchTransactions, updateTransaction } from '../data/transactions'
 import { applyCorrection } from '../data/rules'
@@ -9,10 +8,9 @@ import { formatAUD, formatDayMonth, isoToday } from '../domain/money'
 import { normaliseMerchant } from '../domain/merchant'
 import { matchRule } from '../domain/ruleEngine'
 import { groupByDay } from '../domain/grouping'
-import { useWho } from '../lib/useWho'
 import { CategoryPicker } from '../components/CategoryPicker'
 import { IconCircle } from '../components/ui/IconCircle'
-import { PersonAvatar } from '../components/ui/PersonAvatar'
+import { PersonSwitcher } from '../components/PersonSwitcher'
 import { SegmentedControl } from '../components/ui/SegmentedControl'
 import { EmptyState } from '../components/ui/EmptyState'
 import { DEDUCTION_CATEGORIES } from '../domain/deductionCategories'
@@ -34,11 +32,9 @@ function monthBounds(iso: string): { from: string; to: string } {
 }
 
 export default function Transactions() {
-  const { user } = useAuth()
-  const { categories, profiles, rules } = useData()
+  const { categories, rules, viewId, readOnly } = useData()
   const [month, setMonth] = useState(() => isoToday().slice(0, 7))
   const [txns, setTxns] = useState<Txn[]>([])
-  const [who, setWho] = useWho()
   const [catFilter, setCatFilter] = useState('')
   const [search, setSearch] = useState('')
   const [results, setResults] = useState<Txn[] | null>(null)
@@ -50,31 +46,31 @@ export default function Transactions() {
 
   const load = useCallback(() => {
     const { from, to } = monthBounds(month)
-    fetchTransactions(from, to).then(setTxns).catch(() => setTxns([]))
-  }, [month])
+    if (!viewId) return
+    fetchTransactions(from, to, viewId).then(setTxns).catch(() => setTxns([]))
+  }, [month, viewId])
   useEffect(load, [load])
   useRealtime(['budget_transactions'], load)
 
   useEffect(() => {
     if (!searching) return setResults(null)
     const t = setTimeout(() => {
-      searchTransactions(search.trim()).then(setResults).catch(() => setResults([]))
+      searchTransactions(search.trim(), viewId).then(setResults).catch(() => setResults([]))
     }, 250)
     return () => clearTimeout(t)
-  }, [search, searching])
+  }, [search, searching, viewId])
 
   const source = searching ? (results ?? []) : txns
   const visible = useMemo(
     () =>
       source.filter(
-        (t) => (who === 'all' || t.owner_id === user?.id) && (!catFilter || t.category_id === catFilter),
+        (t) => !catFilter || t.category_id === catFilter,
       ),
-    [source, who, catFilter, user],
+    [source, catFilter],
   )
   const groups = useMemo(() => groupByDay(visible), [visible])
 
   const cat = (id: string | null) => categories.find((c) => c.id === id)
-  const owner = (id: string) => profiles.find((p) => p.id === id)?.display_name ?? '?'
 
   // Confirm a best-guess category in place — the suggested chip animates out.
   const confirmGuess = async (t: Txn) => {
@@ -89,7 +85,7 @@ export default function Transactions() {
     setRescanning(true)
     setRescanNote('')
     try {
-      const rows = await fetchUnconfirmed()
+      const rows = await fetchUnconfirmed(viewId)
       const updates = new Map<string, string[]>() // category id → txn ids
       for (const r of rows) {
         const norm = r.merchant_norm || normaliseMerchant(r.description)
@@ -123,17 +119,21 @@ export default function Transactions() {
       <div className="row--between">
         <h1 className="brand">Activity</h1>
         <div className="row" style={{ gap: 8 }}>
-          <button className="btn btn--small" disabled={rescanning} onClick={() => void rescan()}>
-            {rescanning ? 'Scanning…' : 'Re-scan'}
-          </button>
-          <Link to="/import" className="gear" aria-label="Import CSV">⤓</Link>
-          <Link className="header-add" to="/add" aria-label="Add transaction">＋</Link>
+          <PersonSwitcher />
+          {!readOnly && (
+            <>
+              <button className="btn btn--small" disabled={rescanning} onClick={() => void rescan()}>
+                {rescanning ? 'Scanning…' : 'Re-scan'}
+              </button>
+              <Link to="/import" className="gear" aria-label="Import CSV">⤓</Link>
+              <Link className="header-add" to="/add" aria-label="Add transaction">＋</Link>
+            </>
+          )}
         </div>
       </div>
       {rescanNote && <p className="txn__sub" style={{ whiteSpace: 'normal' }}>{rescanNote}</p>}
       <input className="input" placeholder="Search everything…" value={search} onChange={(e) => setSearch(e.target.value)} />
       <div className="row" style={{ margin: '10px 0' }}>
-        <SegmentedControl options={[{ value: 'mine', label: 'Me' }, { value: 'all', label: 'Both' }]} value={who} onChange={setWho} />
         <select className="input" value={catFilter} onChange={(e) => setCatFilter(e.target.value)}>
           <option value="">All categories</option>
           {categories.map((c) => (
@@ -167,12 +167,9 @@ export default function Transactions() {
                       {searching ? `${formatDayMonth(t.txn_date)} · ` : ''}{cat(t.category_id)?.name ?? 'Uncategorised'} · {t.account}
                     </div>
                   </div>
-                  <div className="txn__side">
-                    <span className={`amount ${t.amount < 0 ? 'amount--neg' : 'amount--pos'}`}>{formatAUD(t.amount)}</span>
-                    <PersonAvatar name={owner(t.owner_id)} isMe={t.owner_id === user?.id} size={18} />
-                  </div>
+                  <span className={`amount ${t.amount < 0 ? 'amount--neg' : 'amount--pos'}`}>{formatAUD(t.amount)}</span>
                 </button>
-                {!t.category_confirmed && t.category_id && (
+                {!readOnly && !t.category_confirmed && t.category_id && (
                   <div style={{ padding: '0 2px 10px' }}>
                     <button className="chip chip--suggest" onClick={() => void confirmGuess(t)}>
                       {cat(t.category_id)?.icon} {cat(t.category_id)?.name}? — tap to confirm
@@ -185,13 +182,13 @@ export default function Transactions() {
         </div>
       ))}
       {groups.length === 0 && (
-        <EmptyState icon="🧾" title={searching ? 'Nothing found' : 'No transactions yet'} hint={searching ? 'Try a different search.' : 'Tap ＋ to add a spend, or import a CSV.'} />
+        <EmptyState icon="🧾" title={searching ? 'Nothing found' : 'No transactions yet'} hint={searching ? 'Try a different search.' : readOnly ? undefined : 'Tap ＋ to add a spend, or import a CSV.'} />
       )}
 
-      {detail && user && (
+      {detail && (
         <TxnSheet
           txn={detail}
-          mine={detail.owner_id === user.id}
+          mine={!readOnly}
           onClose={() => setDetail(null)}
           onChanged={() => { setDetail(null); load(); if (searching) setSearch('') }}
         />
@@ -280,7 +277,7 @@ function TxnSheet({ txn, mine, onClose, onChanged }: { txn: Txn; mine: boolean; 
   }
 
   const showMerchant = () => {
-    fetchByMerchant(txn.merchant_norm).then(setMerchant).catch(() => setMerchant([]))
+    fetchByMerchant(txn.merchant_norm, txn.owner_id).then(setMerchant).catch(() => setMerchant([]))
   }
 
   return (
@@ -296,13 +293,19 @@ function TxnSheet({ txn, mine, onClose, onChanged }: { txn: Txn; mine: boolean; 
               {formatDayMonth(txn.txn_date)} · {txn.account} · {txn.source === 'manual' ? 'added by hand' : 'imported'}
               {txn.note && <><br />“{txn.note}”</>}
             </p>
-            <button className="chip" onClick={() => setPicking(true)}>
-              {cat ? `${cat.icon} ${cat.name}` : '＋ categorise'}{!txn.category_confirmed && cat ? ' (best guess — tap to fix)' : ''}
-            </button>
-            <button className={`chip${txn.deductible ? ' chip--confirmed' : ''}`} disabled={busy} onClick={() => void toggleDeductible()}>
-              {txn.deductible ? '✓ Tax-deductible' : '＋ Mark tax-deductible'}
-            </button>
-            {txn.deductible && (
+            {mine ? (
+              <>
+                <button className="chip" onClick={() => setPicking(true)}>
+                  {cat ? `${cat.icon} ${cat.name}` : '＋ categorise'}{!txn.category_confirmed && cat ? ' (best guess — tap to fix)' : ''}
+                </button>
+                <button className={`chip${txn.deductible ? ' chip--confirmed' : ''}`} disabled={busy} onClick={() => void toggleDeductible()}>
+                  {txn.deductible ? '✓ Tax-deductible' : '＋ Mark tax-deductible'}
+                </button>
+              </>
+            ) : (
+              <span className="chip">{cat ? `${cat.icon} ${cat.name}` : 'Uncategorised'}</span>
+            )}
+            {mine && txn.deductible && (
               <select
                 className="input"
                 value={txn.deduction_category ?? 'other'}
@@ -325,7 +328,7 @@ function TxnSheet({ txn, mine, onClose, onChanged }: { txn: Txn; mine: boolean; 
                 ))}
               </div>
             )}
-            <button className="btn" onClick={addAgain}>Add again</button>
+            {mine && <button className="btn" onClick={addAgain}>Add again</button>}
             {mine && <button className="btn" onClick={() => setEditing(true)}>Edit</button>}
             {mine && <button className="btn" style={{ color: 'var(--danger)' }} disabled={busy} onClick={() => void remove()}>Delete</button>}
           </>

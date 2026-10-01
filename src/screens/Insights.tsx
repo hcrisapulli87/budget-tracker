@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useAuth } from '../auth/AuthProvider'
 import { useData } from '../data/DataProvider'
 import { fetchTransactions } from '../data/transactions'
 import { useRealtime } from '../data/useRealtime'
-import { useWho } from '../lib/useWho'
 import {
   rangeBounds, cashFlow, categoryBreakdownWithDelta, merchantLeaderboard,
   dayOfWeekPattern, averages,
@@ -12,6 +10,7 @@ import type { Range } from '../domain/stats'
 import { budgetPace } from '../domain/budgetMath'
 import { formatAUD, formatDayMonth, isoToday } from '../domain/money'
 import { SegmentedControl } from '../components/ui/SegmentedControl'
+import { PersonSwitcher } from '../components/PersonSwitcher'
 import { ProgressBar } from '../components/ui/ProgressBar'
 import { StatCard } from '../components/ui/StatCard'
 import { EmptyState } from '../components/ui/EmptyState'
@@ -20,9 +19,7 @@ import type { Txn } from '../data/types'
 const DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
 export default function Insights() {
-  const { user } = useAuth()
-  const { categories, budgets } = useData()
-  const [who, setWho] = useWho()
+  const { categories, budgets, viewId } = useData()
   const [range, setRange] = useState<Range>('month')
   const [txns, setTxns] = useState<Txn[]>([])
   const [drill, setDrill] = useState<string | null>(null) // category id
@@ -32,8 +29,9 @@ export default function Insights() {
 
   const load = useCallback(() => {
     // fetch prev+current window in one go
-    fetchTransactions(bounds.prevFrom, bounds.to).then(setTxns).catch(() => setTxns([]))
-  }, [bounds])
+    if (!viewId) return
+    fetchTransactions(bounds.prevFrom, bounds.to, viewId).then(setTxns).catch(() => setTxns([]))
+  }, [bounds, viewId])
   useEffect(load, [load])
   useRealtime(['budget_transactions', 'budget_budgets'], load)
 
@@ -41,7 +39,7 @@ export default function Insights() {
     () => new Set(categories.filter((c) => c.exclude_from_analytics).map((c) => c.id)),
     [categories],
   )
-  const mine = useMemo(() => (who === 'all' ? txns : txns.filter((t) => t.owner_id === user?.id)), [txns, who, user])
+  const mine = txns // already just the viewed person's
 
   const cf = useMemo(() => cashFlow(mine, bounds.from, bounds.to, excluded), [mine, bounds, excluded])
   const cats = useMemo(() => categoryBreakdownWithDelta(mine, bounds, excluded), [mine, bounds, excluded])
@@ -53,7 +51,7 @@ export default function Insights() {
   const totalSpend = cats.reduce((s, c) => s + c.total, 0)
   const maxDow = Math.max(1, ...dow)
 
-  // budgets always measure the household month, independent of range/person
+  // budgets always measure the current month, independent of the range picker
   const monthB = rangeBounds('month', today)
   const monthTxns = txns.filter((t) => t.txn_date >= monthB.from && t.txn_date <= monthB.to)
   const dayOfMonth = Number(today.slice(8, 10))
@@ -73,7 +71,7 @@ export default function Insights() {
     <div className="screen">
       <div className="row--between">
         <h1 className="brand">Insights</h1>
-        <SegmentedControl options={[{ value: 'mine', label: 'Me' }, { value: 'all', label: 'Both' }]} value={who} onChange={setWho} />
+        <PersonSwitcher />
       </div>
       <SegmentedControl
         grow
@@ -158,7 +156,6 @@ export default function Insights() {
               </div>
             )
           })}
-          <p className="txn__sub" style={{ whiteSpace: 'normal' }}>Budgets track the household (both of you) against each shared limit.</p>
         </div>
       )}
 

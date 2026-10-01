@@ -1,24 +1,21 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { useAuth } from '../auth/AuthProvider'
 import { useData } from '../data/DataProvider'
 import { fetchTransactions } from '../data/transactions'
 import { fetchSubscriptions } from '../data/subscriptions'
 import { fetchAccounts } from '../data/accounts'
-import { fetchSettlements, recordSettlement } from '../data/settlements'
 import { useRealtime } from '../data/useRealtime'
-import { useWho } from '../lib/useWho'
 import { summarise } from '../domain/analytics'
 import { buildInsights } from '../domain/insights'
 import { budgetPace } from '../domain/budgetMath'
 import { rangeBounds } from '../domain/stats'
-import { computeSettlement } from '../domain/settle'
+import { visibleTo } from '../domain/ownership'
 import { formatAUD, formatDayMonth, isoToday, addDaysIso } from '../domain/money'
 import { IconCircle } from '../components/ui/IconCircle'
 import { ProgressBar } from '../components/ui/ProgressBar'
-import { SegmentedControl } from '../components/ui/SegmentedControl'
 import { PersonAvatar } from '../components/ui/PersonAvatar'
-import type { Account, Settlement, Subscription, Txn } from '../data/types'
+import { PersonSwitcher } from '../components/PersonSwitcher'
+import type { Account, Subscription, Txn } from '../data/types'
 
 function shift(iso: string, delta: number): string {
   const [y, m] = iso.split('-').map(Number)
@@ -39,33 +36,29 @@ const QUICK_LINKS = [
 ]
 
 export default function Dashboard() {
-  const { user } = useAuth()
-  const { categories, budgets, profiles } = useData()
+  const { categories, budgets, me, viewing, viewId, readOnly } = useData()
   const navigate = useNavigate()
   const [txns, setTxns] = useState<Txn[]>([])
   const [subs, setSubs] = useState<Subscription[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
-  const [settlements, setSettlements] = useState<Settlement[]>([])
-  const [settling, setSettling] = useState(false)
-  const [who, setWho] = useWho()
   const today = isoToday()
   const month = today.slice(0, 7)
   const prevMonth = shift(month, -1)
 
   const load = useCallback(() => {
-    fetchTransactions(`${shift(month, -3)}-01`, monthBounds(month).to).then(setTxns).catch(() => setTxns([]))
-    fetchSubscriptions().then(setSubs).catch(() => setSubs([]))
-    fetchAccounts().then(setAccounts).catch(() => setAccounts([]))
-    fetchSettlements().then(setSettlements).catch(() => setSettlements([]))
-  }, [month])
+    if (!viewId) return
+    fetchTransactions(`${shift(month, -3)}-01`, monthBounds(month).to, viewId).then(setTxns).catch(() => setTxns([]))
+    fetchSubscriptions().then((s) => setSubs(s.filter((x) => x.owner_id === viewId))).catch(() => setSubs([]))
+    fetchAccounts().then((a) => setAccounts(visibleTo(a, viewId))).catch(() => setAccounts([]))
+  }, [month, viewId])
   useEffect(load, [load])
-  useRealtime(['budget_transactions', 'budget_subscriptions', 'budget_accounts', 'budget_budgets', 'budget_settlements'], load)
+  useRealtime(['budget_transactions', 'budget_subscriptions', 'budget_accounts', 'budget_budgets'], load)
 
   const excluded = useMemo(
     () => new Set(categories.filter((c) => c.exclude_from_analytics).map((c) => c.id)),
     [categories],
   )
-  const mine = useMemo(() => (who === 'all' ? txns : txns.filter((t) => t.owner_id === user?.id)), [txns, who, user])
+  const mine = txns // already just the viewed person's
   const cur = useMemo(() => summarise(mine, monthBounds(month).from, monthBounds(month).to, excluded), [mine, month, excluded])
   const week = rangeBounds('week', today)
   const weekSum = useMemo(() => summarise(mine, week.from, week.to, excluded), [mine, week.from, week.to, excluded])
@@ -77,32 +70,11 @@ export default function Dashboard() {
 
   const netWorth = accounts.filter((a) => !a.is_archived).reduce((s, a) => s + (a.balance ?? 0), 0)
   const cat = (id: string | null) => categories.find((c) => c.id === id)
-  const me = profiles.find((p) => p.id === user?.id)
-  const partner = profiles.find((p) => p.id !== user?.id)
   const hour = new Date().getHours()
   const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'
 
-  // ── couple settle-up ──────────────────────────────────────────────────────
-  const lastSettled = settlements[0]?.settled_at?.slice(0, 10) ?? null
-  const settle = useMemo(
-    () => (user && partner ? computeSettlement(txns, user.id, partner.id, lastSettled) : null),
-    [txns, user, partner, lastSettled],
-  )
-  const doSettle = async () => {
-    if (!settle || !user || !partner || settling || settle.owed === null) return
-    setSettling(true)
-    try {
-      const owedTo = settle.owed === 'you' ? user.id : partner.id
-      const paidBy = settle.owed === 'you' ? partner.id : user.id
-      await recordSettlement({ from_id: paidBy, to_id: owedTo, amount: settle.amount, created_by: user.id })
-      load()
-    } finally {
-      setSettling(false)
-    }
-  }
-
-  // household spend for budgets (never person-filtered)
-  const householdMonth = useMemo(() => {
+  // the viewed person's spend this month, against their own budgets
+  const monthTxns = useMemo(() => {
     const { from, to } = monthBounds(month)
     return txns.filter((t) => t.txn_date >= from && t.txn_date <= to)
   }, [txns, month])
@@ -110,14 +82,14 @@ export default function Dashboard() {
   const topBudgets = useMemo(() => {
     return budgets
       .map((b) => {
-        const spent = householdMonth
+        const spent = monthTxns
           .filter((t) => t.category_id === b.category_id && t.amount < 0)
           .reduce((s, t) => s - t.amount, 0)
         return { ...b, spent, used: b.monthly_limit > 0 ? spent / b.monthly_limit : 0 }
       })
       .sort((a, b) => b.used - a.used)
       .slice(0, 3)
-  }, [budgets, householdMonth])
+  }, [budgets, monthTxns])
 
   const monthly = useMemo(() => {
     const months = [shift(month, -3), shift(month, -2), shift(month, -1), month]
@@ -145,7 +117,6 @@ export default function Dashboard() {
   )
 
   const recent = mine.slice(0, 5)
-  const ownerName = (id: string) => profiles.find((p) => p.id === id)?.display_name ?? '?'
 
   return (
     <div className="screen">
@@ -155,18 +126,15 @@ export default function Dashboard() {
           <p className="txn__sub">{formatDayMonth(today)}</p>
         </div>
         <div className="row" style={{ gap: 10 }}>
-          <Link className="header-add" to="/add" aria-label="Add transaction">＋</Link>
+          <PersonSwitcher />
+          {!readOnly && <Link className="header-add" to="/add" aria-label="Add transaction">＋</Link>}
           <Link to="/settings" aria-label="Settings" style={{ textDecoration: 'none' }}>
             {me ? <PersonAvatar name={me.display_name} isMe size={40} /> : <span className="gear">⚙️</span>}
           </Link>
         </div>
       </div>
-      <div className="row" style={{ margin: '10px 0' }}>
-        <SegmentedControl options={[{ value: 'mine', label: 'You' }, { value: 'all', label: 'Both' }]} value={who} onChange={setWho} />
-      </div>
-
       <div className="hero hero--tint">
-        <div className="hero__label">Spent this month{who === 'mine' ? ' · you' : ''}</div>
+        <div className="hero__label">Spent this month{readOnly && viewing ? ` · ${viewing.display_name}` : ''}</div>
         <div className="stat">{formatAUD(cur.spend)}</div>
         <div className={`delta ${delta <= 0 ? 'amount--pos' : 'error'}`}>
           {delta <= 0 ? '▼' : '▲'} {formatAUD(Math.abs(delta))} vs last month to today · {formatAUD(cur.income)} in
@@ -178,41 +146,8 @@ export default function Dashboard() {
         </svg>
       </div>
 
-      {/* couple settle-up */}
-      {settle && partner && me && (
-        <div className="card card--tint">
-          <h2>Settle up</h2>
-          {settle.owed === null ? (
-            <div className="row" style={{ gap: 10 }}>
-              <span style={{ fontSize: '1.4rem' }}>✅</span>
-              <div>
-                <div className="stat--small">All square</div>
-                <div className="txn__sub">Shared spend is even{lastSettled ? ` since ${formatDayMonth(lastSettled)}` : ''}.</div>
-              </div>
-            </div>
-          ) : (
-            <>
-              <div className="row" style={{ gap: 12 }}>
-                <PersonAvatar name={(settle.owed === 'you' ? partner : me).display_name} isMe={settle.owed !== 'you'} size={34} />
-                <div className="txn__main">
-                  <div className="stat--small">
-                    {settle.owed === 'you'
-                      ? `${partner.display_name} owes you ${formatAUD(settle.amount)}`
-                      : `You owe ${partner.display_name} ${formatAUD(settle.amount)}`}
-                  </div>
-                  <div className="txn__sub">half the gap in shared spend{lastSettled ? ` since ${formatDayMonth(lastSettled)}` : ''}</div>
-                </div>
-              </div>
-              <button className="btn btn--primary" disabled={settling} onClick={() => void doSettle()}>
-                {settling ? 'Settling…' : 'Settle up — mark all square'}
-              </button>
-            </>
-          )}
-        </div>
-      )}
-
       <button className="statcard" style={{ width: '100%', textAlign: 'left', cursor: 'pointer' }} onClick={() => navigate('/accounts')}>
-        <div className="statcard__label">Net worth · all accounts</div>
+        <div className="statcard__label">Net worth · {readOnly ? 'their' : 'your'} accounts</div>
         <div className="statcard__value" style={{ fontSize: '1.5rem' }}>{formatAUD(netWorth)}</div>
         <div className="statcard__sub">Spent this week: {formatAUD(weekSum.spend)} · tap for accounts & goals</div>
       </button>
@@ -261,12 +196,12 @@ export default function Dashboard() {
             <IconCircle icon={cat(t.category_id)?.icon ?? '❓'} colour={cat(t.category_id)?.colour ?? '#8ba59a'} size={32} />
             <div className="txn__main">
               <div className="txn__desc" style={{ fontSize: '0.9rem' }}>{t.description}</div>
-              <div className="txn__sub">{formatDayMonth(t.txn_date)} · {ownerName(t.owner_id)}</div>
+              <div className="txn__sub">{formatDayMonth(t.txn_date)} · {t.account}</div>
             </div>
             <span className={`amount ${t.amount < 0 ? 'amount--neg' : 'amount--pos'}`} style={{ fontSize: '0.9rem' }}>{formatAUD(t.amount)}</span>
           </div>
         ))}
-        {recent.length === 0 && <p className="muted">Tap ＋ to add your first spend.</p>}
+        {recent.length === 0 && <p className="muted">{readOnly ? 'Nothing here yet.' : 'Tap ＋ to add your first spend.'}</p>}
       </div>
 
       {observations.length > 0 && (

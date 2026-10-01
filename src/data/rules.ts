@@ -2,9 +2,10 @@ import { supabase } from '../lib/supabase'
 import type { Txn } from './types'
 
 /**
- * User corrected a transaction's category. Persist the correction, learn a rule
- * from the merchant, and retro-apply it to that merchant's other unconfirmed
- * transactions. This is the whole "learning" mechanism — no ML.
+ * User corrected one of their own transactions' category. Persist the
+ * correction, learn a rule (theirs — it overrides the household default for
+ * them only), and retro-apply it to their other unconfirmed transactions at
+ * that merchant. This is the whole "learning" mechanism — no ML.
  */
 export async function applyCorrection(txn: Txn, categoryId: string): Promise<void> {
   const { error: txnError } = await supabase
@@ -18,6 +19,7 @@ export async function applyCorrection(txn: Txn, categoryId: string): Promise<voi
   const { data: existing, error: findError } = await supabase
     .from('budget_rules')
     .select('*')
+    .eq('owner_id', txn.owner_id)
     .eq('pattern', txn.merchant_norm)
     .maybeSingle()
   if (findError) throw findError
@@ -31,13 +33,14 @@ export async function applyCorrection(txn: Txn, categoryId: string): Promise<voi
   } else {
     const { error } = await supabase
       .from('budget_rules')
-      .insert({ pattern: txn.merchant_norm, category_id: categoryId, created_from: 'correction' })
+      .insert({ owner_id: txn.owner_id, pattern: txn.merchant_norm, category_id: categoryId, created_from: 'correction' })
     if (error) throw error
   }
 
   const { error: retroError } = await supabase
     .from('budget_transactions')
     .update({ category_id: categoryId })
+    .eq('owner_id', txn.owner_id)
     .eq('merchant_norm', txn.merchant_norm)
     .eq('category_confirmed', false)
   if (retroError) throw retroError
