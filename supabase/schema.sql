@@ -288,6 +288,155 @@ alter table public.budget_members enable row level security;
 drop policy if exists "budget_members: read all (authenticated)" on public.budget_members;
 create policy "budget_members: read all (authenticated)" on public.budget_members for select to authenticated using (true);
 
+-- ── v9 — competitive roadmap (2026-10) ────────────────────────────────────────
+-- Split transactions, rollover budgets, goals (personal or Joint), comments,
+-- shared spend + settle-up, forecast settings, account kinds + balance history,
+-- Web Push subscriptions, receipts linked to transactions. Additive only.
+
+-- splits: [{category_id, amount}] — signed like the parent amount, summing to it.
+-- null = not split (the whole amount sits in category_id).
+alter table public.budget_transactions add column if not exists splits jsonb;
+-- shared: a cost both of us owe half of (counts towards settle-up).
+alter table public.budget_transactions add column if not exists shared boolean not null default false;
+
+-- rollover: unspent (or overspent) budget carries into next month, counted from rollover_from.
+alter table public.budget_budgets add column if not exists rollover boolean not null default false;
+alter table public.budget_budgets add column if not exists rollover_from date;
+
+-- kind drives net worth grouping; credit/loan balances are entered as negatives.
+alter table public.budget_accounts add column if not exists kind text not null default 'bank';
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'budget_accounts_kind_check') then
+    alter table public.budget_accounts add constraint budget_accounts_kind_check
+      check (kind in ('bank', 'savings', 'credit', 'super', 'investment', 'property', 'loan', 'other'));
+  end if;
+end $$;
+
+-- one row per account per day a balance was seen — powers the net-worth chart.
+create table if not exists public.budget_balance_history (
+  id         uuid primary key default gen_random_uuid(),
+  account_id uuid not null references public.budget_accounts (id) on delete cascade,
+  as_of      date not null,
+  balance    numeric(12,2) not null,
+  unique (account_id, as_of)
+);
+
+-- Savings goals. owner_id null = Joint goal both of us save towards.
+create table if not exists public.budget_goals (
+  id            uuid primary key default gen_random_uuid(),
+  owner_id      uuid references public.profiles (id) on delete cascade default auth.uid(),
+  name          text not null,
+  icon          text not null default '🎯',
+  target_amount numeric(12,2) not null check (target_amount > 0),
+  target_date   date,
+  saved_amount  numeric(12,2) not null default 0,
+  is_archived   boolean not null default false,
+  created_at    timestamptz not null default now()
+);
+
+-- Comments on a transaction — either of us can comment on either person's.
+create table if not exists public.budget_comments (
+  id         uuid primary key default gen_random_uuid(),
+  txn_id     uuid not null references public.budget_transactions (id) on delete cascade,
+  author_id  uuid not null references public.profiles (id) on delete cascade default auth.uid(),
+  body       text not null check (length(body) between 1 and 500),
+  created_at timestamptz not null default now()
+);
+create index if not exists budget_comments_txn_idx on public.budget_comments (txn_id);
+
+-- Per-person forecast settings (pay cycle override + safety buffer). Detected
+-- automatically from income when left empty.
+create table if not exists public.budget_settings (
+  owner_id       uuid primary key references public.profiles (id) on delete cascade default auth.uid(),
+  pay_cadence    text check (pay_cadence in ('weekly', 'fortnightly', 'monthly')),
+  pay_amount     numeric(12,2),
+  next_payday    date,
+  buffer         numeric(12,2) not null default 100,
+  updated_at     timestamptz not null default now()
+);
+
+-- Web Push endpoints (one per device). Private: only the push sender (service
+-- role) and the owner ever read them.
+create table if not exists public.budget_push_subscriptions (
+  id         uuid primary key default gen_random_uuid(),
+  owner_id   uuid not null references public.profiles (id) on delete cascade default auth.uid(),
+  endpoint   text not null unique,
+  p256dh     text not null,
+  auth       text not null,
+  prefs      jsonb not null default '{"bills": true, "budgets": true, "subs": true}',
+  created_at timestamptz not null default now()
+);
+
+-- What tally-push has already sent, so each alert goes out once. RLS on with no
+-- policies = only the service role (the Edge Function) can touch it.
+create table if not exists public.budget_push_log (
+  owner_id uuid not null references public.profiles (id) on delete cascade,
+  key      text not null,
+  sent_at  timestamptz not null default now(),
+  primary key (owner_id, key)
+);
+alter table public.budget_push_log enable row level security;
+
+-- A receipt can now be attached straight to a deductible transaction.
+alter table public.tax_documents drop constraint if exists tax_documents_link_type_check;
+alter table public.tax_documents add constraint tax_documents_link_type_check
+  check (link_type in ('income', 'deduction', 'transaction', 'none'));
+
+alter table public.budget_balance_history    enable row level security;
+alter table public.budget_goals              enable row level security;
+alter table public.budget_comments           enable row level security;
+alter table public.budget_settings           enable row level security;
+alter table public.budget_push_subscriptions enable row level security;
+
+-- goals: own-or-joint, like bills/accounts
+drop policy if exists "budget_goals: read all (authenticated)" on public.budget_goals;
+create policy "budget_goals: read all (authenticated)" on public.budget_goals for select to authenticated using (true);
+drop policy if exists "budget_goals: write own or joint" on public.budget_goals;
+create policy "budget_goals: write own or joint" on public.budget_goals for all to authenticated
+  using (owner_id = auth.uid() or owner_id is null) with check (owner_id = auth.uid() or owner_id is null);
+
+-- balance history: writable by whoever can write the account
+drop policy if exists "budget_balance_history: read all (authenticated)" on public.budget_balance_history;
+create policy "budget_balance_history: read all (authenticated)" on public.budget_balance_history for select to authenticated using (true);
+drop policy if exists "budget_balance_history: write with account" on public.budget_balance_history;
+create policy "budget_balance_history: write with account" on public.budget_balance_history for all to authenticated
+  using (exists (select 1 from public.budget_accounts a where a.id = account_id and (a.owner_id = auth.uid() or a.owner_id is null)))
+  with check (exists (select 1 from public.budget_accounts a where a.id = account_id and (a.owner_id = auth.uid() or a.owner_id is null)));
+
+-- comments: read all, write/delete only your own
+drop policy if exists "budget_comments: read all (authenticated)" on public.budget_comments;
+create policy "budget_comments: read all (authenticated)" on public.budget_comments for select to authenticated using (true);
+drop policy if exists "budget_comments: insert own" on public.budget_comments;
+create policy "budget_comments: insert own" on public.budget_comments for insert to authenticated with check (author_id = auth.uid());
+drop policy if exists "budget_comments: delete own" on public.budget_comments;
+create policy "budget_comments: delete own" on public.budget_comments for delete to authenticated using (author_id = auth.uid());
+
+-- settings: read all (the partner view forecasts with their settings), write own
+drop policy if exists "budget_settings: read all (authenticated)" on public.budget_settings;
+create policy "budget_settings: read all (authenticated)" on public.budget_settings for select to authenticated using (true);
+drop policy if exists "budget_settings: write own" on public.budget_settings;
+create policy "budget_settings: write own" on public.budget_settings for all to authenticated
+  using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+
+-- push subscriptions: owner only (endpoints are bearer-like secrets)
+drop policy if exists "budget_push_subscriptions: owner only" on public.budget_push_subscriptions;
+create policy "budget_push_subscriptions: owner only" on public.budget_push_subscriptions for all to authenticated
+  using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+
+do $$
+declare t text;
+begin
+  foreach t in array array['budget_goals', 'budget_comments', 'budget_settings', 'budget_balance_history', 'budget_settlements'] loop
+    if not exists (
+      select 1 from pg_publication_tables
+      where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = t
+    ) then
+      execute format('alter publication supabase_realtime add table public.%I', t);
+    end if;
+  end loop;
+end $$;
+
 -- ── Seeds (idempotent via unique names/patterns) ─────────────────────────────
 
 insert into public.budget_categories (name, colour, icon, sort_order) values

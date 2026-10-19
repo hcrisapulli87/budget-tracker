@@ -60,3 +60,21 @@ export function downloadTaxSummary(fy: number, csv: string): void {
   a.remove()
   URL.revokeObjectURL(url)
 }
+
+/** Deductible transactions with no receipt attached — the ATO wants a record for each claim. */
+export function receiptGaps(taggedDeductions: Txn[], documents: TaxDocument[]): Txn[] {
+  const covered = new Set(documents.filter((d) => d.link_type === 'transaction' && d.link_id).map((d) => d.link_id))
+  return taggedDeductions.filter((t) => !covered.has(t.id)).sort((a, b) => a.amount - b.amount)
+}
+
+/** "receipts/2026-03-01 Officeworks.pdf" — unique, filesystem-safe names for the accountant pack. */
+export function packFileNames(docs: { title: string; date: string | null; storage_path: string }[]): string[] {
+  const seen = new Map<string, number>()
+  return docs.map((d) => {
+    const ext = /\.[a-z0-9]{1,5}$/i.exec(d.storage_path)?.[0] ?? ''
+    const stem = `${d.date ?? 'undated'} ${d.title.replace(ext, '')}`.replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim().slice(0, 80)
+    const n = (seen.get(stem) ?? 0) + 1
+    seen.set(stem, n)
+    return `receipts/${stem}${n > 1 ? ` (${n})` : ''}${ext}`
+  })
+}

@@ -43,6 +43,15 @@ export interface Txn {
   note: string
   deductible: boolean
   deduction_category: string | null
+  /** null = not split. Each part is signed like `amount`; parts sum to it. */
+  splits?: TxnSplit[] | null
+  /** A cost both people owe half of — counts towards settle-up. */
+  shared?: boolean
+}
+
+export interface TxnSplit {
+  category_id: string | null
+  amount: number
 }
 
 export type Cadence = 'weekly' | 'fortnightly' | 'monthly' | 'quarterly' | 'annual'
@@ -71,6 +80,16 @@ export interface Account {
   goal_amount: number | null
   bsb: string | null
   account_number: string | null
+  kind?: AccountKind
+}
+
+export type AccountKind = 'bank' | 'savings' | 'credit' | 'super' | 'investment' | 'property' | 'loan' | 'other'
+
+export interface BalancePoint {
+  id: string
+  account_id: string
+  as_of: string
+  balance: number
 }
 
 export type BillFrequency = 'monthly' | 'quarterly' | 'annual'
@@ -95,6 +114,51 @@ export interface Budget {
   owner_id: string
   category_id: string
   monthly_limit: number
+  rollover?: boolean
+  /** First month (yyyy-mm-01) the rollover counts from. */
+  rollover_from?: string | null
+}
+
+export interface Goal {
+  id: string
+  /** null = Joint goal, shown to and fundable by both people */
+  owner_id: string | null
+  name: string
+  icon: string
+  target_amount: number
+  target_date: string | null
+  saved_amount: number
+  is_archived: boolean
+  created_at: string
+}
+
+export interface Comment {
+  id: string
+  txn_id: string
+  author_id: string
+  body: string
+  created_at: string
+}
+
+export interface Settlement {
+  id: string
+  /** who paid the difference */
+  from_id: string
+  /** who was owed it */
+  to_id: string
+  amount: number
+  settled_at: string
+  created_by: string
+}
+
+export type PayCadence = 'weekly' | 'fortnightly' | 'monthly'
+
+export interface ForecastSettings {
+  owner_id: string
+  pay_cadence: PayCadence | null
+  pay_amount: number | null
+  next_payday: string | null
+  buffer: number
 }
 
 export interface ImportRecord {
@@ -135,7 +199,7 @@ export interface TaxDeduction {
 }
 
 export type TaxDocType = 'receipt' | 'statement' | 'other'
-export type TaxLinkType = 'income' | 'deduction' | 'none'
+export type TaxLinkType = 'income' | 'deduction' | 'transaction' | 'none'
 
 export interface TaxDocument {
   id: string
