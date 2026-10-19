@@ -2,9 +2,11 @@
 // read every Tally user's data; it only ever sends a person their own alerts.
 //
 // Deploy:   supabase functions deploy tally-push --no-verify-jwt
-// Secrets:  supabase secrets set VAPID_PUBLIC_KEY=... VAPID_PRIVATE_KEY=... VAPID_SUBJECT=mailto:you@example.com PUSH_CRON_SECRET=<random>
-// Schedule: see README ("Push notifications") — pg_cron calls it daily with
-//           the header  x-cron-secret: <PUSH_CRON_SECRET>.
+// Secrets:  VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT (shared with
+//           Orbit's notify function — one key pair for the project).
+// Schedule: see README ("Push notifications") — pg_cron calls it daily with an
+//           x-cron-secret header read from Vault (tally_push_cron_secret); the
+//           function checks it via tally_push_secret_ok(), so it never holds a copy.
 //
 // Alerts (each sent once, tracked in budget_push_log):
 //   bills    a bill (yours or Joint) due within 3 days
@@ -21,11 +23,12 @@ interface Alert { key: string; title: string; body: string; url: string; kind: '
 interface PushSub { id: string; owner_id: string; endpoint: string; p256dh: string; auth: string; prefs: Record<string, boolean> }
 
 Deno.serve(async (req) => {
-  const secret = Deno.env.get('PUSH_CRON_SECRET')
-  if (!secret || req.headers.get('x-cron-secret') !== secret) return new Response('forbidden', { status: 403 })
+  const db = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
+  const candidate = req.headers.get('x-cron-secret') ?? ''
+  const { data: ok } = candidate ? await db.rpc('tally_push_secret_ok', { candidate }) : { data: false }
+  if (ok !== true) return new Response('forbidden', { status: 403 })
 
   webpush.setVapidDetails(Deno.env.get('VAPID_SUBJECT') ?? 'mailto:tally@example.com', Deno.env.get('VAPID_PUBLIC_KEY')!, Deno.env.get('VAPID_PRIVATE_KEY')!)
-  const db = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
 
   // "today" in Melbourne, matching the Discord bill reminders
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Australia/Melbourne' })
@@ -36,6 +39,8 @@ Deno.serve(async (req) => {
   if (subsErr) return new Response(subsErr.message, { status: 500 })
   const subscriptions = (subsRows ?? []) as PushSub[]
   const owners = [...new Set(subscriptions.map((s) => s.owner_id))]
+  // nobody has turned push on yet — nothing to work out
+  if (owners.length === 0) return new Response(JSON.stringify({ delivered: 0, pruned: 0, devices: 0 }), { headers: { 'Content-Type': 'application/json' } })
 
   const [{ data: bills }, { data: budgets }, { data: cats }, { data: detected }, { data: txns }, { data: log }] = await Promise.all([
     db.from('budget_bills').select('id, owner_id, name, amount, next_due').gte('next_due', today).lte('next_due', soon),

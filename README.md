@@ -89,22 +89,26 @@ newly spotted subscriptions or price rises. Each alert is sent once (tracked in
 `budget_push_log`). On iPhone, push only works once Tally is added to the Home
 Screen (iOS 16.4+).
 
-1. `npx web-push generate-vapid-keys`
-2. Vercel env: `VITE_VAPID_PUBLIC_KEY=<public key>` (redeploy).
-3. Edge Function:
+1. VAPID keys: this project already has `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`
+   and `VAPID_SUBJECT` set as Edge Function secrets (shared with Orbit's
+   `notify` function). On a fresh project, create them with
+   `npx web-push generate-vapid-keys` and `supabase secrets set ...`.
+2. Vercel env: `VITE_VAPID_PUBLIC_KEY=<the same public key>` (redeploy).
+3. Run `supabase/schema.sql` — it generates the schedule password straight
+   into Vault (`tally_push_cron_secret`); nobody needs to copy it anywhere.
+4. Deploy and schedule (enable `pg_cron` and `pg_net` first). 21:05 UTC is
+   8:05 AM Melbourne in daylight time (7:05 AM otherwise):
    ```
    supabase functions deploy tally-push --no-verify-jwt
-   supabase secrets set VAPID_PUBLIC_KEY=... VAPID_PRIVATE_KEY=... \
-     VAPID_SUBJECT=mailto:you@example.com PUSH_CRON_SECRET=<long random string>
    ```
-4. Schedule it daily (SQL Editor; enable the `pg_cron` and `pg_net`
-   extensions first). 21:05 UTC is 8:05 AM Melbourne in daylight time (7:05 AM
-   otherwise), alongside the Discord reminders:
    ```sql
    select cron.schedule('tally-push-daily', '5 21 * * *', $$
      select net.http_post(
        url := 'https://<project-ref>.supabase.co/functions/v1/tally-push',
-       headers := '{"Content-Type": "application/json", "x-cron-secret": "<PUSH_CRON_SECRET>"}'::jsonb,
+       headers := jsonb_build_object(
+         'Content-Type', 'application/json',
+         'x-cron-secret', (select decrypted_secret from vault.decrypted_secrets where name = 'tally_push_cron_secret')
+       ),
        body := '{}'::jsonb
      )
    $$);

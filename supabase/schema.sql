@@ -378,6 +378,30 @@ create table if not exists public.budget_push_log (
 );
 alter table public.budget_push_log enable row level security;
 
+-- tally-push's schedule password: generated in the database, kept in Vault,
+-- never typed by anyone. The function checks a header against it through
+-- tally_push_secret_ok(), which only the service role may call.
+do $$
+begin
+  if not exists (select 1 from vault.secrets where name = 'tally_push_cron_secret') then
+    perform vault.create_secret(encode(extensions.gen_random_bytes(32), 'hex'), 'tally_push_cron_secret', 'x-cron-secret header for the tally-push Edge Function');
+  end if;
+end $$;
+create or replace function public.tally_push_secret_ok(candidate text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select exists (
+    select 1 from vault.decrypted_secrets
+    where name = 'tally_push_cron_secret' and decrypted_secret = candidate
+  )
+$$;
+revoke all on function public.tally_push_secret_ok(text) from public, anon, authenticated;
+grant execute on function public.tally_push_secret_ok(text) to service_role;
+
 -- A receipt can now be attached straight to a deductible transaction.
 alter table public.tax_documents drop constraint if exists tax_documents_link_type_check;
 alter table public.tax_documents add constraint tax_documents_link_type_check
