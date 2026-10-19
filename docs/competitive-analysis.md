@@ -2,6 +2,22 @@
 
 *October 2026. Desk research plus a review of the Tally codebase at `88ed470`.*
 
+## Status (v9, October 2026)
+
+| # | Roadmap item | Status |
+|---|---|---|
+| 1 | Up Bank live sync | **Dropped**: we don't bank with Up |
+| 2 | Lower-friction imports | **Shipped**: bank auto-detect, OFX/QFX/QIF, several files at once, per-bank export help, "import due" nudge on Home |
+| 3 | Rollover budgets + sinking funds | **Shipped**: per-category rollover; a Sinking Funds card built from quarterly/annual bills |
+| 4 | Split transactions | **Shipped**: split editor; each part counts towards its own budget and trend |
+| 5 | Cash-flow forecast + safe to spend | **Shipped**: Forecast screen, pay cycle detected (or set by hand), 60-day balance chart, Home card |
+| 6 | Couples layer 2.0 | **Shipped**: Joint goals, comments on transactions, shared costs with settle-up, monthly Recap |
+| 7 | Web Push notifications | **Shipped**: bills, budgets and subscriptions alerts, each with its own toggle (needs VAPID keys and a daily schedule, see README) |
+| 8 | Tax-time autopilot | **Shipped**: estimate of what deductions are worth back, missing-receipt list with attach, accountant pack (.zip) |
+| 9 | Ask Tally (AI) | **Shipped**: Claude via a Supabase Edge Function, aggregates only (needs `ANTHROPIC_API_KEY`, see README) |
+| 10 | Net worth incl. super/investments | **Shipped**: account types, debts counted as negative, 12-month net-worth chart |
+| 11 | CDR intermediary feeds | **Deferred**: costs money and carries compliance obligations; only worth it if Tally goes beyond one household |
+
 ## 1. Summary
 
 Tally is already stronger than most competitors in three areas: **Australian tax
