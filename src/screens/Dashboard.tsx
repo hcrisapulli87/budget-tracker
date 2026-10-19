@@ -7,7 +7,8 @@ import { fetchAccounts } from '../data/accounts'
 import { useRealtime } from '../data/useRealtime'
 import { summarise } from '../domain/analytics'
 import { buildInsights } from '../domain/insights'
-import { budgetPace } from '../domain/budgetMath'
+import { budgetPace, budgetUsage, earliestBudgetMonth, spendByCategoryMonth } from '../domain/budgetMath'
+import { expandSplits } from '../domain/splits'
 import { rangeBounds } from '../domain/stats'
 import { visibleTo } from '../domain/ownership'
 import { buildRecurring, countdown, dueBetween } from '../domain/recurring'
@@ -17,7 +18,14 @@ import { IconCircle } from '../components/ui/IconCircle'
 import { ProgressBar } from '../components/ui/ProgressBar'
 import { PersonAvatar } from '../components/ui/PersonAvatar'
 import { PersonSwitcher } from '../components/PersonSwitcher'
-import type { Account, Bill, Subscription, Txn } from '../data/types'
+import { fetchGoals } from '../data/goals'
+import { fetchImports } from '../data/imports'
+import { fetchRecentComments } from '../data/comments'
+import { useForecast } from '../data/useForecast'
+import { GoalsCard } from '../components/GoalsCard'
+import { SettleUpCard } from '../components/SettleUpCard'
+import { groupNetWorth } from '../domain/netWorth'
+import type { Account, Bill, Comment, Goal, Subscription, Txn } from '../data/types'
 
 function shift(iso: string, delta: number): string {
   const [y, m] = iso.split('-').map(Number)
@@ -31,38 +39,59 @@ function monthBounds(iso: string): { from: string; to: string } {
 }
 
 const QUICK_LINKS = [
+  { to: '/forecast', icon: '🔮', label: 'Forecast' },
   { to: '/trends', icon: '📈', label: 'Trends' },
+  { to: '/recap', icon: '💌', label: 'Recap' },
+  { to: '/ask', icon: '✨', label: 'Ask' },
   { to: '/tax', icon: '🧮', label: 'Tax' },
   { to: '/import', icon: '⤓', label: 'Import' },
+  { to: '/budgets', icon: '🎯', label: 'Goals' },
   { to: '/settings', icon: '⚙️', label: 'Settings' },
 ]
 
+/** Nudge to import once the newest statement is this many days old. */
+const IMPORT_STALE_DAYS = 7
+
 export default function Dashboard() {
-  const { categories, budgets, me, viewing, viewId, readOnly } = useData()
+  const { categories, budgets, me, profiles, viewing, viewId, readOnly } = useData()
   const navigate = useNavigate()
   const [txns, setTxns] = useState<Txn[]>([])
   const [subs, setSubs] = useState<Subscription[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
   const [bills, setBills] = useState<Bill[]>([])
+  const [goals, setGoals] = useState<Goal[]>([])
+  const [lastImport, setLastImport] = useState<string | null | undefined>(undefined)
+  const [comments, setComments] = useState<Comment[]>([])
+  const forecast = useForecast(30)
   const today = isoToday()
   const month = today.slice(0, 7)
   const prevMonth = shift(month, -1)
 
+  // rollover budgets need spend back to their start month
+  const since = useMemo(() => {
+    const e = earliestBudgetMonth(budgets, month)
+    return e < shift(month, -3) ? e : shift(month, -3)
+  }, [budgets, month])
+
   const load = useCallback(() => {
     if (!viewId) return
-    fetchTransactions(`${shift(month, -3)}-01`, monthBounds(month).to, viewId).then(setTxns).catch(() => setTxns([]))
+    fetchTransactions(`${since}-01`, monthBounds(month).to, viewId).then(setTxns).catch(() => setTxns([]))
     fetchSubscriptions().then((s) => setSubs(s.filter((x) => x.owner_id === viewId))).catch(() => setSubs([]))
     fetchAccounts().then((a) => setAccounts(visibleTo(a, viewId))).catch(() => setAccounts([]))
     fetchBills().then((b) => setBills(visibleTo(b, viewId))).catch(() => setBills([]))
-  }, [month, viewId])
+    fetchGoals().then((g) => setGoals(visibleTo(g, viewId).filter((x) => !x.is_archived))).catch(() => setGoals([]))
+    fetchImports(viewId, 1).then((i) => setLastImport(i[0]?.imported_at.slice(0, 10) ?? null)).catch(() => setLastImport(undefined))
+    fetchRecentComments(3).then(setComments).catch(() => setComments([]))
+  }, [month, since, viewId])
   useEffect(load, [load])
-  useRealtime(['budget_transactions', 'budget_subscriptions', 'budget_accounts', 'budget_budgets', 'budget_bills'], load)
+  useRealtime(['budget_transactions', 'budget_subscriptions', 'budget_accounts', 'budget_budgets', 'budget_bills', 'budget_goals', 'budget_comments'], load)
 
   const excluded = useMemo(
     () => new Set(categories.filter((c) => c.exclude_from_analytics).map((c) => c.id)),
     [categories],
   )
-  const mine = txns // already just the viewed person's
+  // already just the viewed person's; split rows count once per part for category maths
+  const mine = useMemo(() => expandSplits(txns), [txns])
   const cur = useMemo(() => summarise(mine, monthBounds(month).from, monthBounds(month).to, excluded), [mine, month, excluded])
   const week = rangeBounds('week', today)
   const weekSum = useMemo(() => summarise(mine, week.from, week.to, excluded), [mine, week.from, week.to, excluded])
@@ -85,28 +114,26 @@ export default function Dashboard() {
   const maxMonth = Math.max(1, ...last3.map((m) => m.spend))
   const monthName = (m: string) => new Date(`${m}-01T00:00:00`).toLocaleDateString('en-AU', { month: 'short' })
 
-  const netWorth = accounts.filter((a) => !a.is_archived).reduce((s, a) => s + (a.balance ?? 0), 0)
+  const netWorth = groupNetWorth(accounts).net
+  const importAge = lastImport ? Math.round((Date.parse(today) - Date.parse(lastImport)) / 86_400_000) : null
   const cat = (id: string | null) => categories.find((c) => c.id === id)
+  const personName = (id: string) => profiles.find((p) => p.id === id)?.display_name ?? '?'
   const hour = new Date().getHours()
   const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'
 
   // the viewed person's spend this month, against their own budgets
-  const monthTxns = useMemo(() => {
-    const { from, to } = monthBounds(month)
-    return txns.filter((t) => t.txn_date >= from && t.txn_date <= to)
-  }, [txns, month])
+  const budgetTxns = mine
   const daysInMonth = Number(monthBounds(month).to.slice(8, 10))
   const topBudgets = useMemo(() => {
+    const spend = spendByCategoryMonth(budgetTxns)
     return budgets
       .map((b) => {
-        const spent = monthTxns
-          .filter((t) => t.category_id === b.category_id && t.amount < 0)
-          .reduce((s, t) => s - t.amount, 0)
-        return { ...b, spent, used: b.monthly_limit > 0 ? spent / b.monthly_limit : 0 }
+        const u = budgetUsage(b, spend, month)
+        return { ...u, used: u.available > 0 ? u.spent / u.available : 0 }
       })
       .sort((a, b) => b.used - a.used)
       .slice(0, 3)
-  }, [budgets, monthTxns])
+  }, [budgets, budgetTxns, month])
 
   const monthly = useMemo(() => {
     const months = [shift(month, -3), shift(month, -2), shift(month, -1), month]
@@ -133,12 +160,12 @@ export default function Dashboard() {
     [monthly, subs, categories, today],
   )
 
-  const recent = mine.slice(0, 5)
+  const recent = txns.slice(0, 5)
 
   // categories Tally guessed (or couldn't) this month that you haven't confirmed
   const toReview = useMemo(
-    () => mine.filter((t) => !t.category_confirmed && t.txn_date >= `${month}-01`).length,
-    [mine, month],
+    () => txns.filter((t) => !t.category_confirmed && t.txn_date >= `${month}-01`).length,
+    [txns, month],
   )
 
   // next fortnight of bills + subscriptions
@@ -194,6 +221,21 @@ export default function Dashboard() {
         </Link>
       )}
 
+      {!readOnly && lastImport !== undefined && (importAge === null || importAge >= IMPORT_STALE_DAYS) && (
+        <Link to="/import" className="card row--between" style={{ textDecoration: 'none', color: 'inherit' }}>
+          <span>⤓ {importAge === null ? 'Import your first statement' : <>Last import was <strong>{importAge} days</strong> ago</>}</span>
+          <span className="txn__sub">import →</span>
+        </Link>
+      )}
+
+      {forecast.safe && (
+        <Link to="/forecast" className="statcard" style={{ display: 'block', textDecoration: 'none', color: 'inherit', marginBottom: 14 }}>
+          <div className="statcard__label">Safe to spend · until payday {forecast.pay ? formatDayMonth(forecast.pay.nextPayday) : ''}</div>
+          <div className={`statcard__value${forecast.safe.amount < 0 ? ' error' : ''}`} style={{ fontSize: '1.5rem' }}>{formatAUD(forecast.safe.amount)}</div>
+          <div className="statcard__sub">~{formatAUD(forecast.safe.perDay)}/day · {formatAUD(forecast.safe.committed)} of bills before then · tap for forecast</div>
+        </Link>
+      )}
+
       <button className="statcard" style={{ width: '100%', textAlign: 'left', cursor: 'pointer' }} onClick={() => navigate('/accounts')}>
         <div className="statcard__label">Net worth · {readOnly ? 'their' : 'your'} accounts</div>
         <div className="statcard__value" style={{ fontSize: '1.5rem' }}>{formatAUD(netWorth)}</div>
@@ -217,22 +259,26 @@ export default function Dashboard() {
           </div>
           {topBudgets.map((b) => {
             const c = cat(b.category_id)
-            const pace = budgetPace(b.spent, b.monthly_limit, dayOfMonth, daysInMonth)
+            const pace = budgetPace(b.spent, b.available, dayOfMonth, daysInMonth)
             return (
               <div key={b.id} style={{ marginBottom: 10 }}>
                 <div className="row--between" style={{ fontSize: '0.85rem' }}>
                   <span>{c?.icon} {c?.name}</span>
                   <span className={pace.status === 'over' ? 'error' : pace.status === 'hot' ? 'warn' : 'muted'}>
-                    {formatAUD(b.spent)} of {formatAUD(b.monthly_limit)}
+                    {formatAUD(b.spent)} of {formatAUD(b.available)}
                   </span>
                 </div>
-                <ProgressBar value={b.spent} max={b.monthly_limit} markerAt={pace.expected}
+                <ProgressBar value={b.spent} max={b.available} markerAt={pace.expected}
                   tone={pace.status === 'over' ? 'over' : pace.status === 'hot' ? 'warn' : 'ok'} />
               </div>
             )
           })}
         </div>
       )}
+
+      {goals.length > 0 && <GoalsCard goals={goals.slice(0, 3)} today={today} onOpen={() => navigate('/budgets')} title="Goals" />}
+
+      <SettleUpCard />
 
       {comingUp.length > 0 && (
         <div className="card">
@@ -287,6 +333,23 @@ export default function Dashboard() {
         ))}
         {recent.length === 0 && <p className="muted">{readOnly ? 'Nothing here yet.' : 'Tap ＋ to add your first spend.'}</p>}
       </div>
+
+      {comments.length > 0 && (
+        <div className="card">
+          <div className="row--between">
+            <h2>Latest comments</h2>
+            <Link to="/transactions" className="txn__sub">activity →</Link>
+          </div>
+          {comments.map((c) => (
+            <div key={c.id} className="row" style={{ marginBottom: 6, alignItems: 'flex-start' }}>
+              <PersonAvatar name={personName(c.author_id)} isMe={c.author_id === me?.id} size={24} />
+              <span className="txn__sub" style={{ whiteSpace: 'normal' }}>
+                <strong>{personName(c.author_id)}</strong> · {formatDayMonth(c.created_at.slice(0, 10))}<br />{c.body}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {observations.length > 0 && (
         <div className="card">

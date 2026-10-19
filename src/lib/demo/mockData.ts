@@ -149,15 +149,18 @@ interface Account {
   goal_amount: number | null
   bsb: string | null
   account_number: string | null
+  kind: string
 }
 const bsb = () => `${randInt(10, 99)}${randInt(1000, 9999)}`.replace(/(\d{3})(\d{3})/, '$1-$2')
 const acctNo = () => String(randInt(10000000, 99999999))
 export const accounts: Account[] = [
-  { name: 'Everyday Spending', owner_id: ME_ID, balance: money(1200, 4200), goal_amount: null },
-  { name: 'Emergency Savings', owner_id: ME_ID, balance: money(8000, 22000), goal_amount: 30000 },
-  { name: 'Sam Everyday', owner_id: PARTNER_ID, balance: money(900, 3800), goal_amount: null },
-  { name: 'Holiday Fund', owner_id: PARTNER_ID, balance: money(1500, 9000), goal_amount: 12000 },
-  { name: 'Joint Bills', owner_id: null, balance: money(600, 3200), goal_amount: null },
+  { name: 'Everyday Spending', owner_id: ME_ID, balance: money(1800, 4200), goal_amount: null, kind: 'bank' },
+  { name: 'Emergency Savings', owner_id: ME_ID, balance: money(8000, 22000), goal_amount: 30000, kind: 'savings' },
+  { name: 'AustralianSuper', owner_id: ME_ID, balance: money(60000, 140000), goal_amount: null, kind: 'super' },
+  { name: 'Credit Card', owner_id: ME_ID, balance: -money(200, 1400), goal_amount: null, kind: 'credit' },
+  { name: 'Sam Everyday', owner_id: PARTNER_ID, balance: money(900, 3800), goal_amount: null, kind: 'bank' },
+  { name: 'Holiday Fund', owner_id: PARTNER_ID, balance: money(1500, 9000), goal_amount: 12000, kind: 'savings' },
+  { name: 'Joint Bills', owner_id: null, balance: money(600, 3200), goal_amount: null, kind: 'bank' },
 ].map((a, i) => ({
   id: uid(),
   name: a.name,
@@ -169,8 +172,9 @@ export const accounts: Account[] = [
   goal_amount: a.goal_amount,
   bsb: bsb(),
   account_number: acctNo(),
+  kind: a.kind,
 }))
-const acctFor = (owner: string) => pick(accounts.filter((a) => a.owner_id === owner || a.owner_id === null)).name
+const acctFor = (owner: string) => pick(accounts.filter((a) => (a.owner_id === owner || a.owner_id === null) && (a.kind === 'bank' || a.kind === 'credit'))).name
 
 // ── transactions ────────────────────────────────────────────────────────────────
 interface Txn {
@@ -189,6 +193,8 @@ interface Txn {
   note: string
   deductible: boolean
   deduction_category: string | null
+  splits?: { category_id: string | null; amount: number }[] | null
+  shared?: boolean
 }
 export const transactions: Txn[] = []
 const spendCats = Object.keys(MERCHANTS)
@@ -218,6 +224,8 @@ function addSpend(owner: string, dayOffset: number) {
     note: chance(0.1) ? pick(['split with Sam', 'reimburse later', 'work trip', 'gift for mum']) : '',
     deductible,
     deduction_category: deductible ? pick(['tools', 'self_education', 'vehicle', 'other']) : null,
+    // the odd recent grocery shop or dinner is a shared cost
+    shared: dayOffset < 45 && ['Groceries', 'Eating Out'].includes(catName) && chance(0.35),
   })
 }
 
@@ -572,6 +580,45 @@ export const taxChecklist: TaxChecklistState[] = CHECK_KEYS.map((key) => ({
   done: chance(0.5),
 }))
 
+// ── v9: splits, goals, comments, settle-up, balance history ────────────────────
+// one recent grocery shop split between groceries and household shopping
+{
+  const shop = transactions.find((t) => t.owner_id === ME_ID && t.category_id === catByName('Groceries').id && t.amount < -60)
+  if (shop) {
+    const household = Math.round(shop.amount * 0.3 * 100) / 100
+    shop.splits = [
+      { category_id: catByName('Groceries').id, amount: Math.round((shop.amount - household) * 100) / 100 },
+      { category_id: catByName('Shopping').id, amount: household },
+    ]
+    shop.category_confirmed = true
+  }
+}
+
+export const goals = [
+  { name: 'Japan trip', icon: '✈️', owner_id: null, target_amount: 8000, saved_amount: money(2500, 4500), target_date: daysAgo(-240), created_at: daysAgo(200) },
+  { name: 'Emergency fund top-up', icon: '🛟', owner_id: ME_ID, target_amount: 5000, saved_amount: money(1000, 3000), target_date: daysAgo(-180), created_at: daysAgo(120) },
+  { name: 'New laptop', icon: '💻', owner_id: PARTNER_ID, target_amount: 2200, saved_amount: money(400, 1600), target_date: null, created_at: daysAgo(60) },
+].map((g) => ({ id: uid(), is_archived: false, ...g, created_at: `${g.created_at}T00:00:00Z` }))
+
+const recentMine = transactions.filter((t) => t.owner_id === ME_ID && t.amount < 0 && t.txn_date >= daysAgo(10))
+const recentTheirs = transactions.filter((t) => t.owner_id === PARTNER_ID && t.amount < 0 && t.txn_date >= daysAgo(10))
+export const comments = [
+  recentMine[0] && { txn_id: recentMine[0].id, author_id: PARTNER_ID, body: 'What was this one?', created_at: `${daysAgo(2)}T09:12:00Z` },
+  recentMine[0] && { txn_id: recentMine[0].id, author_id: ME_ID, body: 'Birthday present for your mum 🎁', created_at: `${daysAgo(2)}T09:40:00Z` },
+  recentTheirs[1] && { txn_id: recentTheirs[1].id, author_id: ME_ID, body: 'Shared?', created_at: `${daysAgo(1)}T18:05:00Z` },
+].filter(Boolean).map((c) => ({ id: uid(), ...(c as object) }))
+
+export const settlements = [{ id: uid(), from_id: PARTNER_ID, to_id: ME_ID, amount: money(40, 160), settled_at: `${daysAgo(46)}T10:00:00Z`, created_by: ME_ID }]
+
+// monthly balance readings for the net-worth chart — gentle drift towards today's figure
+export const balanceHistory = accounts.flatMap((a) =>
+  Array.from({ length: 12 }, (_, i) => {
+    const drift = a.kind === 'super' ? 0.012 : a.kind === 'savings' ? 0.02 : 0.04
+    const factor = 1 - drift * (11 - i) + (Math.random() - 0.5) * 0.03
+    return { id: uid(), account_id: a.id, as_of: daysAgo((11 - i) * 30 + 1), balance: Math.round((a.balance ?? 0) * factor * 100) / 100 }
+  }),
+)
+
 // ── the seeded store, keyed by table name (matches schema tables) ──────────────
 export function buildStore(): Record<string, Record<string, unknown>[]> {
   return {
@@ -591,5 +638,9 @@ export function buildStore(): Record<string, Record<string, unknown>[]> {
     tax_deductions: taxDeductions as unknown as Record<string, unknown>[],
     tax_documents: taxDocuments as unknown as Record<string, unknown>[],
     tax_checklist_state: taxChecklist as unknown as Record<string, unknown>[],
+    budget_goals: goals as unknown as Record<string, unknown>[],
+    budget_comments: comments as unknown as Record<string, unknown>[],
+    budget_settlements: settlements as unknown as Record<string, unknown>[],
+    budget_balance_history: balanceHistory as unknown as Record<string, unknown>[],
   }
 }

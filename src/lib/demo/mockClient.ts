@@ -276,10 +276,34 @@ function channel(_name: string) {
   return ch
 }
 
+// ── edge functions: "Ask" answers from the snapshot it was sent, no network ────
+interface AskSnapshot {
+  months?: { month: string; spend: number; byCategory: Record<string, number> }[]
+  safeToSpendUntilPayday?: { amount: number; perDay: number } | null
+  goals?: { name: string; saved: number; target: number }[]
+}
+const aud = (n: number) => new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD' }).format(n)
+const functions = {
+  invoke: async (name: string, opts?: { body?: { question?: string; context?: AskSnapshot } }) => {
+    if (name !== 'tally-ask') return { data: null, error: new Error(`No demo function ${name}`) }
+    const ctx = opts?.body?.context ?? {}
+    const now = ctx.months?.[ctx.months.length - 1]
+    const top = now ? Object.entries(now.byCategory).sort((a, b) => b[1] - a[1])[0] : undefined
+    const lines = [
+      '(Demo mode — a canned answer built from your snapshot. The real thing asks Claude.)',
+      now ? `This month so far you've spent ${aud(now.spend)}${top ? `, most of it on ${top[0]} (${aud(top[1])})` : ''}.` : '',
+      ctx.safeToSpendUntilPayday ? `You have about ${aud(ctx.safeToSpendUntilPayday.amount)} safe to spend before payday — roughly ${aud(ctx.safeToSpendUntilPayday.perDay)} a day.` : '',
+      ctx.goals?.[0] ? `${ctx.goals[0].name} is at ${aud(ctx.goals[0].saved)} of ${aud(ctx.goals[0].target)}.` : '',
+    ]
+    return { data: { answer: lines.filter(Boolean).join('\n\n') }, error: null }
+  },
+}
+
 export const mockSupabase = {
   from: (table: string) => new QueryBuilder(table),
   auth,
   storage,
+  functions,
   channel,
   removeChannel: (ch: { _teardown?: () => void }) => {
     ch._teardown?.()

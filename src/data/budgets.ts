@@ -19,3 +19,13 @@ export async function clearBudget(ownerId: string, categoryId: string): Promise<
   const { error } = await supabase.from('budget_budgets').delete().eq('owner_id', ownerId).eq('category_id', categoryId)
   if (error) throw error
 }
+
+/** Turn carry-over on (counting from this month) or off for one budget. */
+export async function setRollover(ownerId: string, categoryId: string, on: boolean, fromMonthIso: string | null): Promise<void> {
+  const { error } = await supabase
+    .from('budget_budgets')
+    .update({ rollover: on, rollover_from: on ? fromMonthIso : null })
+    .eq('owner_id', ownerId)
+    .eq('category_id', categoryId)
+  if (error) throw error
+}

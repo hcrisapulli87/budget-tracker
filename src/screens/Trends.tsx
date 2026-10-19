@@ -7,6 +7,7 @@ import {
 } from '../domain/stats'
 import type { Range } from '../domain/stats'
 import { formatAUD, isoToday } from '../domain/money'
+import { expandSplits } from '../domain/splits'
 import { SegmentedControl } from '../components/ui/SegmentedControl'
 import { PersonSwitcher } from '../components/PersonSwitcher'
 import { StatCard } from '../components/ui/StatCard'
@@ -35,11 +36,12 @@ export default function Trends() {
     () => new Set(categories.filter((c) => c.exclude_from_analytics).map((c) => c.id)),
     [categories],
   )
-  const mine = txns // already just the viewed person's
+  // already just the viewed person's; split rows count once per part for category maths
+  const mine = useMemo(() => expandSplits(txns), [txns])
 
-  const cf = useMemo(() => cashFlow(mine, bounds.from, bounds.to, excluded), [mine, bounds, excluded])
+  const cf = useMemo(() => cashFlow(txns, bounds.from, bounds.to, excluded), [txns, bounds, excluded])
   const cats = useMemo(() => categoryBreakdownWithDelta(mine, bounds, excluded), [mine, bounds, excluded])
-  const leaders = useMemo(() => merchantLeaderboard(mine, bounds.from, bounds.to, excluded), [mine, bounds, excluded])
+  const leaders = useMemo(() => merchantLeaderboard(txns, bounds.from, bounds.to, excluded), [txns, bounds, excluded])
 
   const cat = (id: string | null) => categories.find((c) => c.id === id)
   const totalSpend = cats.reduce((s, c) => s + c.total, 0)

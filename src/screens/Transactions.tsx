@@ -13,6 +13,12 @@ import { PersonSwitcher } from '../components/PersonSwitcher'
 import { SegmentedControl } from '../components/ui/SegmentedControl'
 import { EmptyState } from '../components/ui/EmptyState'
 import { DEDUCTION_CATEGORIES } from '../domain/deductionCategories'
+import { auFinancialYear } from '../domain/fy'
+import { fetchCommentCounts } from '../data/comments'
+import { uploadDocument } from '../data/taxDocuments'
+import { SplitSheet } from '../components/SplitSheet'
+import { CommentThread } from '../components/CommentThread'
+import { Toggle } from '../components/ui/Toggle'
 import type { AddPrefill } from './AddScreen'
 import type { DeductionCategory, Txn } from '../data/types'
 
@@ -38,6 +44,7 @@ export default function Transactions() {
   const [results, setResults] = useState<Txn[] | null>(null)
   const [detail, setDetail] = useState<Txn | null>(null)
   const [note, setNote] = useState('')
+  const [commentCounts, setCommentCounts] = useState<Map<string, number>>(new Map())
 
   const searching = search.trim().length >= 2
 
@@ -55,6 +62,14 @@ export default function Transactions() {
   useEffect(() => setMonthsBack(STEP), [viewId])
   useEffect(load, [load])
   useRealtime(['budget_transactions'], load)
+
+  const loadCounts = useCallback(() => {
+    const ids = (results ?? txns).map((t) => t.id)
+    if (ids.length === 0) return setCommentCounts(new Map())
+    fetchCommentCounts(ids).then(setCommentCounts).catch(() => setCommentCounts(new Map()))
+  }, [txns, results])
+  useEffect(loadCounts, [loadCounts])
+  useRealtime(['budget_comments'], loadCounts)
 
   useEffect(() => {
     if (!searching) return setResults(null)
@@ -132,7 +147,9 @@ export default function Transactions() {
                   <div className="txn__main">
                     <div className="txn__desc">{t.description}</div>
                     <div className="txn__sub">
-                      {searching ? `${formatDayMonth(t.txn_date)} · ` : ''}{cat(t.category_id)?.name ?? 'Uncategorised'} · {t.account}
+                      {searching ? `${formatDayMonth(t.txn_date)} · ` : ''}{t.splits && t.splits.length > 1 ? `Split ${t.splits.length} ways` : cat(t.category_id)?.name ?? 'Uncategorised'} · {t.account}
+                      {t.shared && ' · 👫 shared'}
+                      {(commentCounts.get(t.id) ?? 0) > 0 && ` · 💬 ${commentCounts.get(t.id)}`}
                     </div>
                   </div>
                   <span className={`amount ${t.amount < 0 ? 'amount--neg' : 'amount--pos'}`}>{formatAUD(t.amount)}</span>
@@ -169,14 +186,17 @@ export default function Transactions() {
           mine={!readOnly}
           onClose={() => setDetail(null)}
           onChanged={(msg) => { setDetail(null); load(); setNote(msg ?? ''); if (searching) setSearch('') }}
+          onCommented={loadCounts}
         />
       )}
     </div>
   )
 }
 
-function TxnSheet({ txn, mine, onClose, onChanged }: { txn: Txn; mine: boolean; onClose: () => void; onChanged: (note?: string) => void }) {
+function TxnSheet({ txn, mine, onClose, onChanged, onCommented }: { txn: Txn; mine: boolean; onClose: () => void; onChanged: (note?: string) => void; onCommented: () => void }) {
   const { categories, reload } = useData()
+  const [splitting, setSplitting] = useState(false)
+  const [receiptNote, setReceiptNote] = useState('')
   const navigate = useNavigate()
   const [editing, setEditing] = useState(false)
   const [picking, setPicking] = useState(false)
@@ -235,6 +255,32 @@ function TxnSheet({ txn, mine, onClose, onChanged }: { txn: Txn; mine: boolean; 
     onChanged()
   }
 
+  const toggleShared = async (shared: boolean) => {
+    setBusy(true)
+    try {
+      await updateTransaction(txn.id, { shared })
+      onChanged(shared ? 'Marked as shared — it now counts towards settle-up on Home.' : undefined)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const attachReceipt = async (file: File | undefined) => {
+    if (!file) return
+    setBusy(true)
+    try {
+      await uploadDocument(file, {
+        owner_id: txn.owner_id, fy: auFinancialYear(txn.txn_date), title: `${txn.description} — ${file.name}`,
+        doc_type: 'receipt', link_type: 'transaction', link_id: txn.id, amount: Math.abs(txn.amount), date: txn.txn_date,
+      })
+      setReceiptNote('Receipt saved to your tax vault ✓')
+    } catch {
+      setReceiptNote('Could not upload that file.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const remove = async () => {
     setBusy(true)
     try {
@@ -273,11 +319,32 @@ function TxnSheet({ txn, mine, onClose, onChanged }: { txn: Txn; mine: boolean; 
               {formatDayMonth(txn.txn_date)} · {txn.account} · {txn.source === 'manual' ? 'added by hand' : 'imported'}
               {txn.note && <><br />“{txn.note}”</>}
             </p>
+            {txn.splits && txn.splits.length > 1 && (
+              <div className="card" style={{ margin: 0 }}>
+                <h2>Split</h2>
+                {txn.splits.map((sp, i) => {
+                  const c = categories.find((x) => x.id === sp.category_id)
+                  return (
+                    <div key={i} className="row--between" style={{ fontSize: '0.85rem' }}>
+                      <span>{c ? `${c.icon} ${c.name}` : 'Uncategorised'}</span>
+                      <span className="amount">{formatAUD(sp.amount)}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
             {mine ? (
               <>
-                <button className="chip" onClick={() => setPicking(true)}>
-                  {cat ? `${cat.icon} ${cat.name}` : '＋ categorise'}{!txn.category_confirmed && cat ? ' (best guess — tap to fix)' : ''}
-                </button>
+                {!(txn.splits && txn.splits.length > 1) && (
+                  <button className="chip" onClick={() => setPicking(true)}>
+                    {cat ? `${cat.icon} ${cat.name}` : '＋ categorise'}{!txn.category_confirmed && cat ? ' (best guess — tap to fix)' : ''}
+                  </button>
+                )}
+                <button className="chip" onClick={() => setSplitting(true)}>{txn.splits && txn.splits.length > 1 ? '✂️ Edit split' : '✂️ Split across categories'}</button>
+                <label className="row--between" style={{ fontSize: '0.88rem' }}>
+                  <span>👫 Shared cost <span className="txn__sub">— you each owe half</span></span>
+                  <Toggle on={!!txn.shared} label="Shared cost" onChange={(on) => void toggleShared(on)} />
+                </label>
                 <button className={`chip${txn.deductible ? ' chip--confirmed' : ''}`} disabled={busy} onClick={() => void toggleDeductible()}>
                   {txn.deductible ? '✓ Tax-deductible' : '＋ Mark tax-deductible'}
                 </button>
@@ -294,6 +361,14 @@ function TxnSheet({ txn, mine, onClose, onChanged }: { txn: Txn; mine: boolean; 
                 {DEDUCTION_CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
               </select>
             )}
+            {mine && txn.deductible && (
+              <label className="btn" style={{ textAlign: 'center' }}>
+                📎 Attach receipt
+                <input type="file" accept="image/*,application/pdf" hidden disabled={busy} onChange={(e) => void attachReceipt(e.target.files?.[0])} />
+              </label>
+            )}
+            {receiptNote && <p className="txn__sub">{receiptNote}</p>}
+            {!mine && txn.shared && <span className="chip">👫 Shared cost</span>}
             {txn.merchant_norm && (
               <button className="btn" onClick={showMerchant}>History at this merchant</button>
             )}
@@ -311,6 +386,7 @@ function TxnSheet({ txn, mine, onClose, onChanged }: { txn: Txn; mine: boolean; 
             {mine && <button className="btn" onClick={addAgain}>Add again</button>}
             {mine && <button className="btn" onClick={() => setEditing(true)}>Edit</button>}
             {mine && <button className="btn" style={{ color: 'var(--danger)' }} disabled={busy} onClick={() => void remove()}>Delete</button>}
+            <CommentThread txnId={txn.id} onChanged={onCommented} />
           </>
         ) : (
           <>
@@ -326,6 +402,7 @@ function TxnSheet({ txn, mine, onClose, onChanged }: { txn: Txn; mine: boolean; 
         )}
       </div>
       {picking && <CategoryPicker categories={categories} onPick={(id) => void pickCategory(id)} onClose={() => setPicking(false)} />}
+      {splitting && <SplitSheet txn={txn} onClose={() => setSplitting(false)} onSaved={() => { setSplitting(false); onChanged('Split saved — each part counts towards its own category.') }} />}
     </div>
   )
 }

@@ -202,7 +202,7 @@ body::before {
 .hero .stat { font-size: 2.9rem; color: var(--ink); }
 .hero__label, .statcard__label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--dim); font-weight: 700; }
 .statcard { background: var(--glass); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; flex: 1; min-width: 0; backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur); box-shadow: var(--shadow-soft); }
-.statcard__value { font-size: 1.2rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+.statcard__value { font-size: clamp(1rem, 4.4vw, 1.2rem); font-weight: 800; font-variant-numeric: tabular-nums; }
 .statcard__sub { font-size: 0.72rem; color: var(--dim); }
 /* accent-tinted variant — settle-up, insight callouts */
 .card--tint, .hero--tint { border-color: rgba(58, 208, 232, 0.45); background: linear-gradient(135deg, rgba(58, 208, 232, 0.14), rgba(127, 140, 255, 0.10)); }
@@ -333,3 +333,15 @@ section:first-of-type > .month-head { margin-top: 8px; }
 .months3__bar { border-radius: 10px 10px 4px 4px; background: rgba(255, 255, 255, 0.22); min-height: 4px; }
 .months3__col--now .months3__bar { background: var(--grad); }
 .months3__label { font-size: 0.72rem; color: var(--dim); margin-top: 6px; white-space: nowrap; }
+
+/* ---- line chart tooltip ---- */
+.chart-tip { position: absolute; top: 0; pointer-events: none; padding: 6px 10px; border-radius: 12px; background: rgba(14, 36, 54, 0.94); border: 1px solid var(--border); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur); box-shadow: var(--shadow-soft); font-size: 0.85rem; white-space: nowrap; }
+
+/* ---- forecast / safe-to-spend ---- */
+.event-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 0.85rem; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.event-row:last-child { border-bottom: 0; }
+
+/* ---- ask Tally ---- */
+.chat-bubble { padding: 10px 14px; border-radius: 18px; margin-bottom: 8px; max-width: 88%; font-size: 0.92rem; line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere; }
+.chat-bubble--me { margin-left: auto; background: var(--accent); color: var(--accent-ink); border-bottom-right-radius: 6px; }
+.chat-bubble--tally { background: var(--glass-2); border: 1px solid var(--border); border-bottom-left-radius: 6px; }

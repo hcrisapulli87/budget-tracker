@@ -1,6 +1,6 @@
 import { supabase } from '../lib/supabase'
 import { fetchAllRows } from './paging'
-import type { Txn, TxnSource } from './types'
+import type { Txn, TxnSource, TxnSplit } from './types'
 
 export interface TxnInsert {
   owner_id: string
@@ -87,6 +87,8 @@ export interface TxnPatch {
   note?: string
   deductible?: boolean
   deduction_category?: string | null
+  splits?: TxnSplit[] | null
+  shared?: boolean
 }
 
 export async function updateTransaction(id: string, patch: TxnPatch): Promise<void> {

@@ -15,6 +15,7 @@ import { createImport, fetchImports } from '../data/imports'
 import { existingKeys, insertTransactions } from '../data/transactions'
 import { syncSubscriptions } from '../data/subscriptions'
 import { createAccount, fetchAccounts, recordBalance, updateAccount } from '../data/accounts'
+import { EXPORT_HELP, detectBankProfile, detectFormat, parseOfx, parseQif } from '../domain/importFormats'
 import type { Account, ImportRecord } from '../data/types'
 
 interface PreviewRow extends KeyedTxn {
@@ -38,7 +39,10 @@ export default function ImportScreen() {
   const { user } = useAuth()
   const { categories, rules, ready } = useData()
   const [account, setAccount] = useState(() => localStorage.getItem('tally.account') ?? '')
-  const [profileId, setProfileId] = useState(() => localStorage.getItem('tally.profile') ?? 'commbank')
+  const [profileId, setProfileId] = useState(() => localStorage.getItem('tally.profile') ?? 'auto')
+  /** files still waiting after the one being previewed (multi-file import) */
+  const [queue, setQueue] = useState<File[]>([])
+  const [detected, setDetected] = useState('')
   const [mapping, setMapping] = useState<ColumnMapping>(DEFAULT_MAPPING)
   const [filename, setFilename] = useState('')
   const [parsedRows, setParsedRows] = useState<ParsedTxn[] | null>(null)
@@ -67,7 +71,7 @@ export default function ImportScreen() {
   }, [accounts])
 
   const profile = useMemo(
-    () => (profileId === 'generic' ? genericProfile(mapping) : BANK_PROFILES.find((p) => p.id === profileId) ?? BANK_PROFILES[0]),
+    () => (profileId === 'generic' ? genericProfile(mapping) : BANK_PROFILES.find((p) => p.id === profileId) ?? null),
     [profileId, mapping],
   )
 
@@ -106,18 +110,37 @@ export default function ImportScreen() {
     setPreview(keyed.map((k) => ({ ...k, duplicate: existing.has(k.key) })))
   }
 
+  /** File → transactions: OFX/QIF by content, CSV by the chosen (or auto-detected) bank format. */
+  const parseFile = async (file: File): Promise<{ parsed: ParsedTxn[]; label: string }> => {
+    const text = await file.text()
+    const format = detectFormat(file.name, text)
+    if (format === 'ofx') return { parsed: parseOfx(text), label: 'OFX statement' }
+    if (format === 'qif') return { parsed: parseQif(text), label: 'QIF statement' }
+    const rows = parseCsv(text)
+    const p = profile ?? detectBankProfile(rows)
+    if (!p) throw new Error("Couldn't recognise this bank's CSV — pick the bank format, or map the columns yourself.")
+    return { parsed: applyProfile(rows, p), label: profile ? p.label : `${p.label.split(' (')[0]} (auto-detected)` }
+  }
+
+  const onFiles = (files: File[]) => {
+    if (files.length === 0) return
+    setResult('')
+    setQueue(files.slice(1))
+    void onFile(files[0])
+  }
+
   const onFile = async (file: File) => {
     setError('')
-    setResult('')
     setPreview(null)
     setUnknownGroups([])
+    setDetected('')
     try {
-      const rows = parseCsv(await file.text())
-      const parsed = applyProfile(rows, profile)
+      const { parsed, label } = await parseFile(file)
       if (parsed.length === 0) {
-        setError('No rows parsed — wrong bank profile for this file?')
+        setError(`No rows parsed from ${file.name} — wrong bank format for this file?`)
         return
       }
+      setDetected(label)
       const byRef = groupByAccountRef(parsed)
       if (byRef.has('') && !account.trim()) {
         setError('Give the account a name first (e.g. "Everyday") — it keys deduplication.')
@@ -138,7 +161,7 @@ export default function ImportScreen() {
         })
       setUnknownGroups(unknown)
       if (unknown.length === 0) await buildPreview(parsed, [])
-      localStorage.setItem('tally.account', account.trim())
+      if (account.trim()) localStorage.setItem('tally.account', account.trim())
       localStorage.setItem('tally.profile', profileId)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not read that file.')
@@ -224,7 +247,8 @@ export default function ImportScreen() {
         }
       }
       const found = await syncSubscriptions(user.id)
-      setResult(
+      setResult((prev) =>
+        (queue.length > 0 || prev.startsWith('📄') ? `${prev ? `${prev}\n` : ''}📄 ${filename}: ` : '') +
         `${totalNew} new, ${preview.length - totalNew} duplicates skipped` +
           (byAccount.size > 1 ? ` across ${byAccount.size} accounts.` : '.') +
           (balanceNotes.length > 0 ? ` Balance${balanceNotes.length > 1 ? 's' : ''}: ${balanceNotes.join(' · ')}.` : '') +
@@ -233,11 +257,24 @@ export default function ImportScreen() {
       setPreview(null)
       setParsedRows(null)
       setUnknownGroups([])
+      // multi-file: move straight on to the next one
+      const [next, ...rest] = queue
+      setQueue(rest)
+      if (next) await onFile(next)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Import failed.')
     } finally {
       setBusy(false)
     }
+  }
+
+  const skipFile = () => {
+    setPreview(null)
+    setParsedRows(null)
+    setUnknownGroups([])
+    const [next, ...rest] = queue
+    setQueue(rest)
+    if (next) void onFile(next)
   }
 
   const previewAccounts = preview ? new Set(preview.map((r) => r.account)) : null
@@ -259,6 +296,7 @@ export default function ImportScreen() {
         )}
         <label className="muted">Bank format</label>
         <select className="input" value={profileId} onChange={(e) => setProfileId(e.target.value)}>
+          <option value="auto">✨ Auto-detect (CSV, OFX, QIF)</option>
           {BANK_PROFILES.map((p) => (
             <option key={p.id} value={p.id}>{p.label}</option>
           ))}
@@ -287,15 +325,19 @@ export default function ImportScreen() {
             </select>
           </div>
         )}
+        <p className="txn__sub" style={{ whiteSpace: 'normal' }}>
+          💡 {EXPORT_HELP[profileId] ?? EXPORT_HELP.generic} You can pick several files at once.
+        </p>
         <input
           className="input"
           type="file"
-          accept=".csv,text/csv"
+          multiple
+          accept=".csv,.ofx,.qfx,.qif,text/csv"
           disabled={!ready}
-          onChange={(e) => e.target.files?.[0] && void onFile(e.target.files[0])}
+          onChange={(e) => { onFiles([...(e.target.files ?? [])]); e.target.value = '' }}
         />
         {error && <p className="error">{error}</p>}
-        {result && <p className="muted">✅ {result}</p>}
+        {result && <p className="muted" style={{ whiteSpace: 'pre-line' }}>✅ {result}</p>}
       </div>
 
       {unknownGroups.length > 0 && !preview && (
@@ -341,10 +383,17 @@ export default function ImportScreen() {
       {preview && (
         <div className="card">
           <div className="row--between">
-            <h2>{filename} — {preview.length} rows{multiAccount ? ` · ${previewAccounts!.size} accounts` : ''}</h2>
+            <h2>{filename} — {preview.length} rows{multiAccount ? ` · ${previewAccounts!.size} accounts` : ` → ${[...previewAccounts!][0]}`}{queue.length > 0 ? ` · ${queue.length} more file${queue.length > 1 ? 's' : ''} queued` : ''}</h2>
             <button className="btn btn--primary" disabled={busy || preview.every((r) => r.duplicate)} onClick={() => void confirm()}>
               {busy ? 'Importing…' : `Import ${preview.filter((r) => !r.duplicate).length} new`}
             </button>
+          </div>
+          <div className="row" style={{ flexWrap: 'wrap', marginBottom: 8 }}>
+            {detected && <span className="badge">{detected}</span>}
+            {!multiAccount && parsedRows && (
+              <button className="btn btn--small" disabled={busy} onClick={() => void buildPreview(parsedRows, unknownGroups)}>Wrong account? Change it above, then tap here</button>
+            )}
+            {queue.length > 0 && <button className="btn btn--small" disabled={busy} onClick={skipFile}>Skip this file</button>}
           </div>
           <div className="table-scroll">
             <table className="preview">

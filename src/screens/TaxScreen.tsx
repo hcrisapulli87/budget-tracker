@@ -14,7 +14,8 @@ import { updateTransaction } from '../data/transactions'
 import { fyLabel, currentFy } from '../domain/fy'
 import { formatAUD, formatDayMonth, isoToday } from '../domain/money'
 import { ratesForFy, VEHICLE_KM_CAP } from '../domain/taxRates'
-import { buildTaxSummaryCsv, downloadTaxSummary } from '../domain/taxExport'
+import { buildTaxSummaryCsv, downloadTaxSummary, packFileNames, receiptGaps } from '../domain/taxExport'
+import { deductionValue, marginalRate } from '../domain/taxEstimate'
 import { StatCard } from '../components/ui/StatCard'
 import { SegmentedControl } from '../components/ui/SegmentedControl'
 import { EmptyState } from '../components/ui/EmptyState'
@@ -110,6 +111,57 @@ export default function TaxScreen() {
     [manualDeductions, taggedDeductions],
   )
   const net = totalIncome - totalDeductions
+  const worthBack = deductionValue(totalIncome, totalDeductions, fy)
+  const gaps = useMemo(() => receiptGaps(taggedDeductions, documents), [taggedDeductions, documents])
+  const [packing, setPacking] = useState('')
+
+  const attachTo = async (t: Txn, file: File | undefined) => {
+    if (!file || !user) return
+    setUploading(true)
+    try {
+      await uploadDocument(file, {
+        owner_id: user.id, fy, title: `${t.description} — ${file.name}`, doc_type: 'receipt',
+        link_type: 'transaction', link_id: t.id, amount: Math.abs(t.amount), date: t.txn_date,
+      })
+      load()
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  /** One zip for the accountant: the summary CSV plus every receipt on file for the year. */
+  const exportPack = async () => {
+    setPacking('Gathering receipts…')
+    try {
+      const { zipSync, strToU8 } = await import('fflate')
+      const files: Record<string, Uint8Array> = {
+        [`tally-tax-${fyLabel(fy).replace('–', '-')}.csv`]: strToU8(buildTaxSummaryCsv(fy, income, manualDeductions, taggedDeductions, documents)),
+      }
+      const names = packFileNames(documents)
+      let missing = 0
+      for (let i = 0; i < documents.length; i++) {
+        try {
+          const res = await fetch(await getSignedUrl(documents[i].storage_path))
+          if (!res.ok) throw new Error(String(res.status))
+          files[names[i]] = new Uint8Array(await res.arrayBuffer())
+        } catch {
+          missing++
+        }
+      }
+      const blob = new Blob([zipSync(files, { level: 6 }) as BlobPart], { type: 'application/zip' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `tally-accountant-pack-${fyLabel(fy).replace('–', '-')}.zip`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+      setPacking(missing > 0 ? `Done — ${missing} receipt${missing > 1 ? 's' : ''} couldn't be downloaded and ${missing > 1 ? 'are' : 'is'} missing from the zip.` : 'Done ✓')
+    } catch {
+      setPacking('Could not build the pack.')
+    }
+  }
 
   const exportSummary = () => {
     const csv = buildTaxSummaryCsv(fy, income, manualDeductions, taggedDeductions, documents)
@@ -146,6 +198,15 @@ export default function TaxScreen() {
         <StatCard label="Deductions" value={formatAUD(totalDeductions)} />
         <StatCard label="Net" value={formatAUD(net)} />
       </div>
+
+      {worthBack > 0 && (
+        <div className="card card--tint">
+          <p style={{ margin: 0 }}>
+            Your deductions are worth roughly <strong>{formatAUD(worthBack)}</strong> back
+            <span className="txn__sub"> — at a {Math.round(marginalRate(Math.max(0, net), fy) * 100)}% marginal rate plus 2% Medicare. A guide only: offsets, HELP and the Medicare thresholds aren't counted.</span>
+          </p>
+        </div>
+      )}
 
       {(deductionCandidates.length > 0 || incomeCandidates.length > 0) && (
         <div className="card">
@@ -221,7 +282,7 @@ export default function TaxScreen() {
       <div className="card">
         <div className="row--between">
           <h2>Deductions</h2>
-          <div className="row" style={{ gap: 6 }}>
+          <div className="row" style={{ gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end', flexShrink: 1, minWidth: 0 }}>
             <button className="btn btn--small" onClick={() => setAddingWfh(true)}>WFH calc</button>
             <button className="btn btn--small" onClick={() => setAddingVehicle(true)}>Vehicle calc</button>
             <button className="btn btn--small" onClick={() => setAddingDeduction(true)}>＋ Add</button>
@@ -252,6 +313,29 @@ export default function TaxScreen() {
           <EmptyState icon="🧾" title="No deductions yet" hint="Add one, or tag a Tally transaction as deductible." />
         )}
       </div>
+
+      {gaps.length > 0 && (
+        <div className="card">
+          <h2>Missing receipts <span className="badge">{gaps.length}</span></h2>
+          <p className="txn__sub" style={{ whiteSpace: 'normal' }}>The ATO expects a record for every claim. Snap the receipt now and it's filed against the transaction.</p>
+          {gaps.slice(0, 8).map((t) => (
+            <div key={t.id} className="txn">
+              <div className="txn__main">
+                <div className="txn__desc">{t.description}</div>
+                <div className="txn__sub">{formatDayMonth(t.txn_date)} · {t.deduction_category ? deductionLabel(t.deduction_category) : 'deductible'}</div>
+              </div>
+              <div className="txn__side">
+                <span className="amount">{formatAUD(Math.abs(t.amount))}</span>
+                <label className="btn btn--small" style={{ cursor: 'pointer' }}>
+                  📎 Attach
+                  <input type="file" accept="image/*,application/pdf" capture="environment" hidden disabled={uploading} onChange={(e) => void attachTo(t, e.target.files?.[0]).then(() => { e.target.value = '' })} />
+                </label>
+              </div>
+            </div>
+          ))}
+          {gaps.length > 8 && <p className="txn__sub">…and {gaps.length - 8} more.</p>}
+        </div>
+      )}
 
       <div className="card">
         <div className="row--between">
@@ -291,7 +375,11 @@ export default function TaxScreen() {
         })}
       </div>
 
-      <button className="btn" style={{ width: '100%' }} onClick={exportSummary}>Export summary (CSV)</button>
+      <div className="row">
+        <button className="btn" style={{ flex: 1 }} onClick={exportSummary}>Export summary (CSV)</button>
+        <button className="btn btn--primary" style={{ flex: 1 }} disabled={packing === 'Gathering receipts…'} onClick={() => void exportPack()}>Accountant pack (.zip)</button>
+      </div>
+      {packing && <p className="txn__sub">{packing}</p>}
 
       {docDetail && (
         <DocumentSheet

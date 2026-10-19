@@ -8,7 +8,9 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
+      includeAssets: ['favicon.svg', 'apple-touch-icon.png', 'push-sw.js'],
+      // Web Push: bill / budget / subscription alerts (see supabase/functions/tally-push)
+      workbox: { importScripts: ['push-sw.js'] },
       manifest: {
         name: 'Tally',
         short_name: 'Tally',

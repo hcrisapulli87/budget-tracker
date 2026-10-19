@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase'
-import type { Account } from './types'
+import { recordBalancePoint } from './balanceHistory'
+import type { Account, AccountKind } from './types'
 
 export async function fetchAccounts(): Promise<Account[]> {
   const { data, error } = await supabase
@@ -19,8 +20,9 @@ export async function createAccount(
   goal: number | null = null,
   bsb: string | null = null,
   accountNumber: string | null = null,
+  kind: AccountKind = 'bank',
 ): Promise<void> {
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('budget_accounts')
     .insert({
       name: name.trim(),
@@ -30,8 +32,12 @@ export async function createAccount(
       goal_amount: goal,
       bsb,
       account_number: accountNumber,
+      kind,
     })
+    .select('id')
+    .single()
   if (error) throw error
+  if (balance !== null && asOfIso && data) await recordBalancePoint((data as { id: string }).id, asOfIso, balance)
 }
 
 export interface AccountPatch {
@@ -42,11 +48,13 @@ export interface AccountPatch {
   goal_amount?: number | null
   bsb?: string | null
   account_number?: string | null
+  kind?: AccountKind
 }
 
 export async function updateAccount(id: string, patch: AccountPatch): Promise<void> {
   const { error } = await supabase.from('budget_accounts').update(patch).eq('id', id)
   if (error) throw error
+  if (patch.balance != null && patch.balance_as_of) await recordBalancePoint(id, patch.balance_as_of, patch.balance)
 }
 
 /**
@@ -65,10 +73,7 @@ export async function recordBalance(name: string, ownerId: string, balance: numb
   const candidates = (rows ?? []) as { id: string; owner_id: string | null; balance_as_of: string | null }[]
   const data = candidates.find((a) => a.owner_id === ownerId) ?? candidates.find((a) => a.owner_id === null)
   if (!data) {
-    const { error: insErr } = await supabase
-      .from('budget_accounts')
-      .insert({ name: trimmed, owner_id: ownerId, balance, balance_as_of: asOfIso })
-    if (insErr) throw insErr
+    await createAccount(trimmed, ownerId, balance, asOfIso)
   } else if (!data.balance_as_of || asOfIso >= data.balance_as_of) {
     await updateAccount(data.id, { balance, balance_as_of: asOfIso })
   }
